@@ -74,8 +74,13 @@ public:
 /**
  * Generic interface for a writable data stream.
  */
+class SeekableWriteStream;
+
 class WriteStream : virtual public Stream {
 public:
+	/** This stream as a SeekableWriteStream, or nullptr (without RTTI). */
+	virtual SeekableWriteStream *asSeekableWriteStream() { return nullptr; }
+
 	/**
 	 * Write data into the stream. Subclasses must implement this
 	 * method. All other write methods are implemented using it.
@@ -350,6 +355,8 @@ public:
  */
 class SeekableWriteStream : public WriteStream {
 public:
+	SeekableWriteStream *asSeekableWriteStream() override { return this; }
+
 	/**
 	 * Set the stream position indicator for the stream.
 	 *

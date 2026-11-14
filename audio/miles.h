@@ -122,6 +122,8 @@ public:
 
 class MidiDriver_Miles_Midi : public MidiDriver_MT32GM, public MidiDriver_Miles_Xmidi_Timbres {
 public:
+	MidiDriver_Miles_Xmidi_Timbres *asXmidiTimbres() override { return this; }
+
 	MidiDriver_Miles_Midi(MusicType midiType, MilesMT32InstrumentEntry *instrumentTablePtr, uint16 instrumentTableCount);
 	~MidiDriver_Miles_Midi();
 

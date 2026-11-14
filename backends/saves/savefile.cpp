@@ -57,7 +57,7 @@ int64 OutSaveFile::pos() const {
 
 bool OutSaveFile::seek(int64 offset, int whence) {
 	Common::SeekableWriteStream *sws =
-		dynamic_cast<Common::SeekableWriteStream *>(_wrapped);
+		_wrapped->asSeekableWriteStream();
 
 	if (sws) {
 		return sws->seek(offset, whence);
@@ -69,7 +69,7 @@ bool OutSaveFile::seek(int64 offset, int whence) {
 
 int64 OutSaveFile::size() const {
 	Common::SeekableWriteStream *sws =
-		dynamic_cast<Common::SeekableWriteStream *>(_wrapped);
+		_wrapped->asSeekableWriteStream();
 
 	if (sws) {
 		return sws->size();

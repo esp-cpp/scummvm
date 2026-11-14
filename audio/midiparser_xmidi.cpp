@@ -326,7 +326,7 @@ void MidiParser_XMIDI::parseNextEvent(EventInfo &info) {
 
 void MidiParser_XMIDI::setMidiDriver(MidiDriver_BASE *driver) {
 	MidiParser::setMidiDriver(driver);
-	_newTimbreListDriver = dynamic_cast<Audio::MidiDriver_Miles_Xmidi_Timbres *>(driver);
+	_newTimbreListDriver = (driver ? driver->asXmidiTimbres() : nullptr);
 }
 
 bool MidiParser_XMIDI::loadMusic(const byte *data, uint32 size) {

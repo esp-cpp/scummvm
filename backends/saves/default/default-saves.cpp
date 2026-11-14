@@ -387,7 +387,8 @@ void DefaultSaveFileManager::saveTimestamps(Common::HashMap<Common::String, uint
 #endif // ifdef USE_CLOUD
 
 Common::Path DefaultSaveFileManager::concatWithSavesPath(Common::String name) {
-	DefaultSaveFileManager *manager = dynamic_cast<DefaultSaveFileManager *>(g_system->getSavefileManager());
+	Common::SaveFileManager *saves = g_system->getSavefileManager();
+	DefaultSaveFileManager *manager = saves && saves->isDefaultSaveFileManager() ? static_cast<DefaultSaveFileManager *>(saves) : nullptr;
 	Common::Path path = (manager ? manager->getSavePath() : ConfMan.getPath("savepath"));
 	path.joinInPlace(name);
 	return path;

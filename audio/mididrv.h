@@ -111,8 +111,15 @@ enum MidiDriverCheckFlags {
 /**
  * TODO: Document this, give it a better name.
  */
+namespace Audio {
+class MidiDriver_Miles_Xmidi_Timbres;
+}
+
 class MidiDriver_BASE {
 public:
+	/** This driver's Miles XMIDI timbre interface, or nullptr (without RTTI). */
+	virtual Audio::MidiDriver_Miles_Xmidi_Timbres *asXmidiTimbres() { return nullptr; }
+
 	static const uint8 MIDI_CHANNEL_COUNT = 16;
 	static const uint8 MIDI_RHYTHM_CHANNEL = 9;
 

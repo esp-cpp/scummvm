@@ -177,7 +177,7 @@ SeekableReadStream *MacResManager::openAppleDoubleWithAppleOrOSXNaming(Archive& 
 		return stream;
 
 	const ArchiveMemberPtr archiveMember = archive.getMember(fileName);
-	const Common::FSNode *plainFsNode = dynamic_cast<const Common::FSNode *>(archiveMember.get());
+	const Common::FSNode *plainFsNode = (archiveMember ? archiveMember->asFSNode() : nullptr);
 
 	// Try finding __MACOSX
 	Common::StringArray components = (plainFsNode ? plainFsNode->getPath() : fileName).splitComponents();

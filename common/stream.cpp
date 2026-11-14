@@ -581,13 +581,13 @@ public:
 		flush();
 
 		Common::SeekableWriteStream *sws =
-			dynamic_cast<Common::SeekableWriteStream *>(_parentStream);
+			_parentStream->asSeekableWriteStream();
 		return sws ? sws->seek(offset, whence) : false;
 	}
 
 	int64 size() const override {
 		Common::SeekableWriteStream *sws =
-			dynamic_cast<Common::SeekableWriteStream *>(_parentStream);
+			_parentStream->asSeekableWriteStream();
 		return sws ? MAX(sws->pos() + _pos, sws->size()) : -1;
 	}
 };

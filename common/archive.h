@@ -67,6 +67,9 @@ typedef List<ArchiveMemberPtr> ArchiveMemberList;  /*!< List of archive members.
  */
 class ArchiveMember {
 public:
+	/** This member as an FSNode, or nullptr (without RTTI). */
+	virtual const FSNode *asFSNode() const { return nullptr; }
+
 	virtual ~ArchiveMember();
 	virtual SeekableReadStream *createReadStream() const = 0; /*!< Create a read stream. */
 	virtual SeekableReadStream *createReadStreamForAltStream(AltStreamType altStreamType) const = 0; /*!< Create a read stream of an alternate stream. */

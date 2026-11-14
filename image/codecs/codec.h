@@ -54,8 +54,13 @@ namespace Image {
  *  - QuickTimeDecoder
  *  - VMDDecoder
  */
+class DitherCodec;
+
 class Codec {
 public:
+	/** This codec as a DitherCodec, or nullptr (without RTTI). */
+	virtual DitherCodec *asDitherCodec() { return nullptr; }
+
 	Codec() {}
 	virtual ~Codec() {}
 

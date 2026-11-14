@@ -402,8 +402,8 @@ void AVIDecoder::readStreamName(uint32 size) {
 
 		// Apply it to the most recently read stream
 		assert(_lastAddedTrack);
-		AVIVideoTrack *vidTrack = dynamic_cast<AVIVideoTrack *>(_lastAddedTrack);
-		AVIAudioTrack *audTrack = dynamic_cast<AVIAudioTrack *>(_lastAddedTrack);
+		AVIVideoTrack *vidTrack = _lastAddedTrack->getTrackType() == Track::kTrackTypeVideo ? static_cast<AVIVideoTrack *>(_lastAddedTrack) : nullptr;
+		AVIAudioTrack *audTrack = _lastAddedTrack->getTrackType() == Track::kTrackTypeAudio ? static_cast<AVIAudioTrack *>(_lastAddedTrack) : nullptr;
 		if (vidTrack)
 			vidTrack->getName() = Common::String(buffer);
 		else if (audTrack)
@@ -423,7 +423,7 @@ void AVIDecoder::readPalette8(uint32 size) {
 	if (!_lastAddedTrack || size != 1024) {
 		skipChunk(size);
 	} else {
-		AVIVideoTrack *vidTrack = dynamic_cast<AVIVideoTrack *>(_lastAddedTrack);
+		AVIVideoTrack *vidTrack = _lastAddedTrack->getTrackType() == Track::kTrackTypeVideo ? static_cast<AVIVideoTrack *>(_lastAddedTrack) : nullptr;
 		if (vidTrack) {
 			vidTrack->loadPaletteFromChunkRaw(_fileStream, 0, 256);
 		} else {

@@ -47,9 +47,14 @@ namespace Audio {
  * Generic audio input stream. Subclasses of this are used to feed arbitrary
  * sampled audio data into ScummVM's audio mixer.
  */
+class RewindableAudioStream;
+
 class AudioStream {
 public:
 	virtual ~AudioStream() {}
+
+	/** This stream as a RewindableAudioStream, or nullptr (without RTTI). */
+	virtual RewindableAudioStream *asRewindable() { return nullptr; }
 
 	/**
 	 * Fill the given buffer with up to @p numSamples samples.
@@ -108,6 +113,8 @@ public:
  */
 class RewindableAudioStream : public virtual AudioStream {
 public:
+	RewindableAudioStream *asRewindable() override { return this; }
+
 	/**
 	 * Rewind the stream to its start.
 	 *

@@ -237,12 +237,12 @@ bool DumpFile::flush() {
 int64 DumpFile::pos() const { return _handle->pos(); }
 
 bool DumpFile::seek(int64 offset, int whence) {
-	SeekableWriteStream *ws = dynamic_cast<SeekableWriteStream *>(_handle);
+	SeekableWriteStream *ws = _handle->asSeekableWriteStream();
 	return ws ? ws->seek(offset, whence) : false;
 }
 
 int64 DumpFile::size() const {
-	SeekableWriteStream *ws = dynamic_cast<SeekableWriteStream *>(_handle);
+	SeekableWriteStream *ws = _handle->asSeekableWriteStream();
 	return ws ? ws->size() : -1;
 }
 

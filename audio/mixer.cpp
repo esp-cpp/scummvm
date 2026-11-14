@@ -806,8 +806,8 @@ Timestamp Channel::getElapsedTime() const {
 void Channel::loop() {
 	assert(_stream);
 
-	if (_stream.isDynamicallyCastable<RewindableAudioStream>()) {
-		Audio::LoopingAudioStream *loopingStream = new Audio::LoopingAudioStream(Common::move(_stream.moveAndDynamicCast<RewindableAudioStream>()), 0, false);
+	if (RewindableAudioStream *rewindable = _stream->asRewindable()) {
+		Audio::LoopingAudioStream *loopingStream = new Audio::LoopingAudioStream(Common::move(_stream.moveAndCastTo(rewindable)), 0, false);
 		_stream.reset(loopingStream, DisposeAfterUse::YES);
 	}
 }

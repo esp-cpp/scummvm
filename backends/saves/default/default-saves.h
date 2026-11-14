@@ -33,6 +33,8 @@
  */
 class DefaultSaveFileManager : public Common::SaveFileManager {
 public:
+	bool isDefaultSaveFileManager() const override { return true; }
+
 	DefaultSaveFileManager();
 	DefaultSaveFileManager(const Common::Path &defaultSavepath);
 

@@ -140,6 +140,10 @@ public:
  * SaveFileManager instances to be used.
  */
 class SaveFileManager : NonCopyable {
+public:
+	/** True for DefaultSaveFileManager and its subclasses (without RTTI). */
+	virtual bool isDefaultSaveFileManager() const { return false; }
+
 
 protected:
 	Error _error;      /*!< Error code. */

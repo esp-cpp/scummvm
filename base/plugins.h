@@ -179,7 +179,8 @@ public:
 
 	template <class T>
 	T &get() const {
-		T *pluginObject = dynamic_cast<T *>(_pluginObject);
+		// (no RTTI: the managers only ask a plugin for the object of its type)
+		T *pluginObject = static_cast<T *>(_pluginObject);
 		if (!pluginObject) {
 			error("Invalid cast of plugin %s", getName());
 		}

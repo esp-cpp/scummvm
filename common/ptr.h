@@ -346,6 +346,15 @@ public:
 	}
 
 	/**
+	 * A pointer of another type to the same object (converted by the caller,
+	 * e.g. with a virtual accessor where there is no RTTI), sharing the count
+	 */
+	template<class T2>
+	SharedPtr<T2> castTo(T2 *converted) const {
+		return SharedPtr<T2>(converted, _tracker);
+	}
+
+	/**
 	 * Performs the equivalent of const_cast to a new pointer type
 	 */
 	template<class T2>
@@ -708,6 +717,22 @@ public:
 	template <class T2>
 	bool isDynamicallyCastable() {
 		return dynamic_cast<T2 *>(_pointer) != nullptr;
+	}
+
+	/* Like moveAndDynamicCast(), with the pointer converted by the caller
+	   (`converted` points to the same object, e.g. from a virtual accessor
+	   where there is no RTTI).
+ 	 */
+	template <class T2, class DL2 = DefaultDeleter<T2> >
+	DisposablePtr<T2, DL2> moveAndCastTo(T2 *converted) {
+		DisposablePtr<T2, DL2> ret(nullptr, DisposeAfterUse::NO);
+		ret._pointer = converted;
+		ret._dispose = _dispose;
+		ret._shared = _shared.castTo(converted);
+		_pointer = nullptr;
+		_dispose = DisposeAfterUse::NO;
+		_shared.reset();
+		return ret;
 	}
 
 	/* Destroys the smart pointer while returning a pointer to

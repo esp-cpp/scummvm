@@ -876,7 +876,7 @@ const Graphics::Surface *QuickTimeDecoder::VideoTrackHandler::bufferNextFrame() 
 	}
 
 	// Update the palette used when dithering
-	Image::DitherCodec *ditherCodec = dynamic_cast<Image::DitherCodec *>(entry->_videoCodec);
+	Image::DitherCodec *ditherCodec = (entry->_videoCodec ? entry->_videoCodec->asDitherCodec() : nullptr);
 	if (ditherCodec && _dirtyPalette) {
 		ditherCodec->setPalette(_curPalette);
 		_dirtyPalette = false;

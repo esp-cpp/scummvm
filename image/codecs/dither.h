@@ -31,6 +31,8 @@ namespace Image {
 
 class DitherCodec : public Codec {
 public:
+	DitherCodec *asDitherCodec() override { return this; }
+
 	DitherCodec(Codec *codec, DisposeAfterUse::Flag disposeAfterUse = DisposeAfterUse::YES);
 	virtual ~DitherCodec() override;
 

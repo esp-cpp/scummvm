@@ -67,6 +67,9 @@ class FSList : public Array<FSNode> {};
  * but it is also possible to use inodes or vrefs (MacOS 9) or anything else.
  */
 class FSNode : public ArchiveMember {
+public:
+	const FSNode *asFSNode() const override { return this; }
+
 private:
 	friend class ::AbstractFSNode;
 	friend class FSDirectory;
