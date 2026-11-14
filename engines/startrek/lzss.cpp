@@ -72,6 +72,7 @@ Common::SeekableReadStream *decodeLZSS(Common::SeekableReadStream *indata, uint3
 	}
 
 	delete[] histbuff;
+	delete indata; // (it's the caller's temporary: decodeLZSS() owns it)
 
 	if (outstreampos != uncompressedSize)
 		error("Size mismatch in LZSS decompression; expected %d bytes, got %d bytes", uncompressedSize, outstreampos);

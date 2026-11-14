@@ -1021,7 +1021,9 @@ void StarTrekEngine::handleBridgeEvents() {
 			_sound->checkLoopMusic();
 			_frameIndex++;
 			_roomFrameCounter++;
-			addAction(ACTION_TICK, _roomFrameCounter & 0xff, (_roomFrameCounter >> 8) & 0xff, 0);
+			// (no ACTION_TICK here: only the away mission loop takes actions
+			// off the queue, so on the bridge it grew by 18 a second, into
+			// the save files too; entering a room clears the queue anyway)
 			if (_roomFrameCounter >= 2)
 				_gfx->incPaletteFadeLevel();
 			break;

@@ -21,6 +21,7 @@
 
 #include "gui/saveload.h"
 
+#include "graphics/surface.h"
 #include "graphics/thumbnail.h"
 
 #include "common/file.h"
@@ -126,6 +127,12 @@ bool StarTrekEngine::loadGame(int slot) {
 	if (!saveOrLoadMetadata(in, nullptr, &meta)) {
 		delete in;
 		return false;
+	}
+	// (the thumbnail is only for the save lists)
+	if (meta.thumbnail) {
+		meta.thumbnail->free();
+		delete meta.thumbnail;
+		meta.thumbnail = nullptr;
 	}
 
 	if (meta.version > CURRENT_SAVEGAME_VERSION) {
