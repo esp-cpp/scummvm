@@ -826,6 +826,9 @@ void Engine::drawHotspots() {
 }
 
 void Engine::openMainMenuDialog() {
+#ifdef SCUMMVM_NO_GUI
+	return; // (the build has no GUI: the backend has its own menu)
+#endif
 	if (!_mainMenuDialog)
 		_mainMenuDialog = new MainMenuDialog(this);
 	Common::TextToSpeechManager *ttsMan = g_system->getTextToSpeechManager();

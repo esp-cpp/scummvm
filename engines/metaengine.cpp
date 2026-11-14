@@ -466,7 +466,11 @@ GUI::OptionsContainerWidget *MetaEngine::buildEngineOptionsWidget(GUI::GuiObject
 		return nullptr;
 	}
 
+#ifdef SCUMMVM_NO_GUI
+	return nullptr; // (a build without the GUI has no options dialogs)
+#else
 	return new GUI::ExtraGuiOptionsWidget(boss, name, target, engineOptions);
+#endif
 }
 
 bool MetaEngine::removeSaveState(const char *target, int slot) const {
