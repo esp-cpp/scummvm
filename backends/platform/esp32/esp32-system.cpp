@@ -496,6 +496,7 @@ void endEngine() {
 	}
 	s_run.engine = nullptr;
 	s_run.metaEngine = nullptr;
+	s_run.game = DetectedGame();
 	SearchMan.clear();
 	if (!s_run.target.empty())
 		ConfMan.removeGameDomain(s_run.target);
@@ -503,7 +504,9 @@ void endEngine() {
 	g_system->getMixer()->stopAll();
 }
 
-Common::Error runEngine() {
+// Detect the game and make its engine (into s_run). Nothing of this stays on
+// the stack while the engine runs: OSystem::quit() jumps over those frames.
+Common::Error createEngine() {
 	Common::FSNode dir{Common::Path(s_gameDir.c_str(), '/')};
 	Common::FSList files;
 	if (!dir.getChildren(files, Common::FSNode::kListAll))
@@ -551,10 +554,17 @@ Common::Error runEngine() {
 	s_run.metaEngine = &metaEngine;
 	s_run.game = game;
 	s_run.descriptor = descriptor;
+	return Common::kNoError;
+}
+
+Common::Error runEngine() {
+	const Common::Error err = createEngine();
+	if (err.getCode() != Common::kNoError)
+		return err;
 	g_system->engineInit();
 	g_system->getEventManager()->purgeKeyboardEvents();
 	g_system->getEventManager()->purgeMouseEvents();
-	return engine->run();
+	return s_run.engine->run();
 }
 
 void engineTask(void *) {
@@ -564,6 +574,7 @@ void engineTask(void *) {
 		err = runEngine();
 	s_quitJumpTask = nullptr;
 	endEngine();
+	scummvm_alloc_report("/sdcard/saves/scummvm_leaks.txt");
 	s_status = err.getCode() == Common::kNoError ? "" : err.getDesc().c_str();
 	printf("[scummvm] engine done: %s\n", s_status.empty() ? "ok" : s_status.c_str());
 	s_running = false;
@@ -587,6 +598,7 @@ static bool start(const std::string &game_dir, bool paused) {
 	}
 	s_gameDir = game_dir;
 	s_status.clear();
+	scummvm_alloc_new_generation();
 	s_system->_quit = false;
 	s_system->quitRequested = false;
 	s_system->pauseRequested = paused;
@@ -620,6 +632,8 @@ void scummvm_pause() {
 	s_system->pauseRequested = true;
 	for (int i = 0; i < 500 && s_running && !s_system->parked; i++)
 		vTaskDelay(pdMS_TO_TICKS(10));
+	// (tracking builds: what the game holds now)
+	scummvm_alloc_report("/sdcard/saves/scummvm_live.txt");
 }
 
 void scummvm_resume() {
@@ -696,40 +710,3 @@ std::span<uint8_t> scummvm_video_buffer() {
 	const size_t n = s_system->graphics()->snapshotRgb565(dst, BoxEmu::FRAME_BUFFER_PIXELS, w, h);
 	return std::span<uint8_t>((uint8_t *)dst, n * 2);
 }
-
-/////////////////////////////////////////////////////////////////////////////
-// Allocations
-/////////////////////////////////////////////////////////////////////////////
-
-// ScummVM makes many small allocations (paths, strings, hash map nodes: an
-// index of a game's files alone is thousands), which ESP-IDF's malloc puts in
-// the scarce internal RAM. The build renames ScummVM's malloc / calloc /
-// realloc / operator new to these (psram_alloc.syms), which prefer PSRAM;
-// free() and delete take either.
-static constexpr uint32_t kPsram = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;
-
-extern "C" void *scummvm_psram_malloc(size_t size) {
-	void *p = heap_caps_malloc(size, kPsram);
-	return p ? p : heap_caps_malloc(size, MALLOC_CAP_DEFAULT);
-}
-
-extern "C" void *scummvm_psram_calloc(size_t n, size_t size) {
-	void *p = heap_caps_calloc(n, size, kPsram);
-	return p ? p : heap_caps_calloc(n, size, MALLOC_CAP_DEFAULT);
-}
-
-extern "C" void *scummvm_psram_realloc(void *ptr, size_t size) {
-	void *p = heap_caps_realloc(ptr, size, kPsram);
-	return p || size == 0 ? p : heap_caps_realloc(ptr, size, MALLOC_CAP_DEFAULT);
-}
-
-void *scummvm_psram_new(size_t size) asm("scummvm_psram_new");
-void *scummvm_psram_new(size_t size) {
-	void *p = scummvm_psram_malloc(size ? size : 1);
-	if (!p)
-		abort(); // (no exceptions)
-	return p;
-}
-
-void *scummvm_psram_new_array(size_t size) asm("scummvm_psram_new_array");
-void *scummvm_psram_new_array(size_t size) { return scummvm_psram_new(size); }

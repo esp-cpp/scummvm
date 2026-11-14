@@ -27,3 +27,8 @@ void scummvm_stop();
 /// The game screen as RGB565 (in the board's frame_buffer1) for screenshots
 std::span<uint8_t> scummvm_video_buffer();
 std::pair<int, int> scummvm_video_size();
+
+/// Allocation tracking (SCUMMVM_ESP32_TRACK_ALLOCS builds; no-ops otherwise):
+/// a new game run, and a report of what the current run left allocated
+void scummvm_alloc_new_generation();
+void scummvm_alloc_report(const char *path);

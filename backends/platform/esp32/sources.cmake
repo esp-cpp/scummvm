@@ -386,6 +386,7 @@ set(SCUMMVM_SOURCES
   video/smk_decoder.cpp
   video/subtitles.cpp
   video/video_decoder.cpp
+  backends/platform/esp32/esp32-alloc.cpp
   backends/platform/esp32/esp32-graphics.cpp
   backends/platform/esp32/esp32-system.cpp
   backends/platform/esp32/gui-stubs.cpp
