@@ -1,0 +1,5 @@
+malloc scummvm_psram_malloc
+calloc scummvm_psram_calloc
+realloc scummvm_psram_realloc
+_Znwj scummvm_psram_new
+_Znaj scummvm_psram_new_array

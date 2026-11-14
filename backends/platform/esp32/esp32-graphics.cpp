@@ -67,8 +67,13 @@ Common::List<Graphics::PixelFormat> Esp32GraphicsManager::getSupportedFormats() 
 void Esp32GraphicsManager::initSize(uint width, uint height, const Graphics::PixelFormat *format) {
 	if (format && format->bytesPerPixel != 1)
 		warning("esp32: only CLUT8 screens are supported");
-	if (_screen.getPixels() && (uint)_screen.w == width && (uint)_screen.h == height)
+	if (_screen.getPixels() && (uint)_screen.w == width && (uint)_screen.h == height) {
+		// (the board forgets the size and palette when a game ends)
+		if (!_overlayVisible)
+			applyNativeSize();
+		_dirty = true;
 		return;
+	}
 	heap_caps_free(_screen.getPixels());
 	_screen.init(width, height, width, psramAlloc(width * height), Graphics::PixelFormat::createFormatCLUT8());
 	// the composed frames hold the overlay too (RGB565)

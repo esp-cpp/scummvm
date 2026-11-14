@@ -50,6 +50,7 @@
 #include "engines/metaengine.h"
 
 #include <atomic>
+#include <csetjmp>
 #include <cstdio>
 #include <ctime>
 #include <string>
@@ -86,8 +87,15 @@ private:
 class Esp32SaveFileManager : public DefaultSaveFileManager {
 public:
 	Common::String redirect;
+	/// the file the next load reads (a game started to load a state)
+	Common::String loadOnce;
 
 	Common::InSaveFile *openForLoading(const Common::String &filename) override {
+		if (!loadOnce.empty()) {
+			Common::FSNode node{Common::Path(loadOnce, '/')};
+			loadOnce.clear();
+			return node.exists() ? node.createReadStream() : nullptr;
+		}
 		if (redirect.empty())
 			return DefaultSaveFileManager::openForLoading(filename);
 		Common::FSNode node{Common::Path(redirect, '/')};
@@ -162,7 +170,10 @@ public:
 		td.tm_year = t.tm_year;
 		td.tm_wday = t.tm_wday;
 	}
-	void quit() override { _quit = true; }
+	// Engines quit with this and expect the process to end (desktop
+	// backends exit()): it jumps back to the engine task's start, which
+	// deletes the engine
+	void quit() override;
 	void logMessage(LogMessageType::Type type, const char *message) override { fputs(message, stdout); }
 	void addSysArchivesToSearchSet(Common::SearchSet &s, int priority) override {}
 	Common::Path getDefaultConfigFileName() override { return Common::Path("/sdcard/saves/scummvm.ini", '/'); }
@@ -174,7 +185,7 @@ public:
 	std::atomic<bool> pauseRequested{false};
 	std::atomic<bool> quitRequested{false};
 	std::atomic<bool> parked{false};
-	enum class Request { NONE, SAVE, LOAD };
+	enum class Request { NONE, SAVE };
 	std::atomic<Request> request{Request::NONE};
 	std::string requestPath;
 	int requestSlot = 0;
@@ -217,6 +228,15 @@ private:
 
 static OSystem_Esp32 *s_system = nullptr;
 
+static jmp_buf s_quitJump;
+static TaskHandle_t s_quitJumpTask = nullptr;
+
+void OSystem_Esp32::quit() {
+	_quit = true;
+	if (s_quitJumpTask && xTaskGetCurrentTaskHandle() == s_quitJumpTask)
+		longjmp(s_quitJump, 1);
+}
+
 void OSystem_Esp32::delayMillis(uint msecs) {
 	service();
 	graphics()->updateScreen(); // a frame that was rate limited away
@@ -225,10 +245,6 @@ void OSystem_Esp32::delayMillis(uint msecs) {
 
 bool OSystem_Esp32::pollEvent(Common::Event &event) {
 	service();
-	if (quitRequested) {
-		event.type = Common::EVENT_QUIT;
-		return true;
-	}
 	pollInput();
 	if (_events.empty())
 		return false;
@@ -238,6 +254,9 @@ bool OSystem_Esp32::pollEvent(Common::Event &event) {
 
 void OSystem_Esp32::service() {
 	((DefaultTimerManager *)getTimerManager())->checkTimers();
+	// (an intro may only delay, never poll: quit from here as well)
+	if (quitRequested.exchange(false))
+		quit();
 	if (!pauseRequested)
 		return;
 	// park (the cart's pause menu is up): the engine is paused, its sound
@@ -245,18 +264,16 @@ void OSystem_Esp32::service() {
 	{
 		PauseToken token = g_engine ? g_engine->pauseEngine() : PauseToken();
 		parked = true;
-		while (pauseRequested) {
+		while (pauseRequested && !quitRequested) {
 			const Request r = request.load();
 			if (r != Request::NONE) {
 				saves()->redirect = requestPath.c_str();
 				if (!g_engine) {
 					requestOk = false;
-				} else if (r == Request::SAVE) {
+				} else {
 					// (the game's own rules: not during a cutscene, etc.)
 					requestOk = g_engine->canSaveGameStateCurrently() &&
 					            g_engine->saveGameState(requestSlot, Common::String::format("Slot %d", requestSlot)).getCode() == Common::kNoError;
-				} else {
-					requestOk = g_engine->loadGameState(requestSlot).getCode() == Common::kNoError;
 				}
 				saves()->redirect.clear();
 				request = Request::NONE;
@@ -266,6 +283,8 @@ void OSystem_Esp32::service() {
 		}
 		parked = false;
 	}
+	if (quitRequested.exchange(false))
+		quit();
 	// the menu drew over the frame and set its own palette
 	graphics()->refresh();
 	// input made in the menu doesn't reach the game
@@ -434,8 +453,12 @@ TaskHandle_t s_engineTask = nullptr;
 TaskHandle_t s_audioTask = nullptr;
 std::atomic<bool> s_running{false};
 std::atomic<bool> s_audioStop{false};
+std::atomic<bool> s_audioDone{false};
 std::string s_gameDir;
 std::string s_status;
+// a state to load when the game starts (save_slot)
+std::string s_loadPath;
+int s_loadSlot = -1;
 
 void audioTask(void *) {
 	const size_t bytes = kMixSamples * 4;
@@ -451,8 +474,33 @@ void audioTask(void *) {
 		BoxEmu::get().play_audio(buf, bytes);
 	}
 	heap_caps_free(buf);
-	s_audioTask = nullptr;
-	vTaskDelete(nullptr);
+	// (tasks made WithCaps are freed by vTaskDeleteWithCaps(), from
+	// scummvm_stop(): a self-delete would leave the stack behind)
+	s_audioDone = true;
+	vTaskSuspend(nullptr);
+}
+
+// the running engine (for the cleanup after OSystem::quit() jumped out)
+struct RunningEngine {
+	Engine *engine = nullptr;
+	MetaEngine *metaEngine = nullptr;
+	DetectedGame game;
+	const void *descriptor = nullptr;
+	Common::String target;
+} s_run;
+
+void endEngine() {
+	if (s_run.engine) {
+		g_system->engineDone();
+		s_run.metaEngine->deleteInstance(s_run.engine, s_run.game, s_run.descriptor);
+	}
+	s_run.engine = nullptr;
+	s_run.metaEngine = nullptr;
+	SearchMan.clear();
+	if (!s_run.target.empty())
+		ConfMan.removeGameDomain(s_run.target);
+	s_run.target.clear();
+	g_system->getMixer()->stopAll();
 }
 
 Common::Error runEngine() {
@@ -468,8 +516,15 @@ Common::Error runEngine() {
 	printf("[scummvm] %s: %s (%s)\n", s_gameDir.c_str(), detected.description.c_str(), detected.gameId.c_str());
 
 	const Common::String target = EngineMan.createTargetForGame(detected);
+	s_run.target = target;
 	ConfMan.setActiveDomain(target);
 	ConfMan.set("music_driver", "adlib", target);
+	if (s_loadSlot >= 0) {
+		// the engine loads the state as it starts (from the cart's slot file)
+		ConfMan.setInt("save_slot", s_loadSlot, target);
+		s_system->saves()->loadOnce = s_loadPath.c_str();
+		s_loadSlot = -1;
+	}
 
 	const Plugin *detectionPlugin = EngineMan.findDetectionPlugin(detected.engineId);
 	if (!detectionPlugin)
@@ -492,29 +547,32 @@ Common::Error runEngine() {
 	}
 	engine->setMetaEngine(&metaEngine);
 	engine->initializePath(dir);
+	s_run.engine = engine;
+	s_run.metaEngine = &metaEngine;
+	s_run.game = game;
+	s_run.descriptor = descriptor;
 	g_system->engineInit();
 	g_system->getEventManager()->purgeKeyboardEvents();
 	g_system->getEventManager()->purgeMouseEvents();
-	err = engine->run();
-	g_system->engineDone();
-	metaEngine.deleteInstance(engine, game, descriptor);
-	SearchMan.clear();
-	ConfMan.removeGameDomain(target);
-	return err;
+	return engine->run();
 }
 
 void engineTask(void *) {
-	const Common::Error err = runEngine();
+	Common::Error err = Common::kNoError;
+	s_quitJumpTask = xTaskGetCurrentTaskHandle();
+	if (setjmp(s_quitJump) == 0)
+		err = runEngine();
+	s_quitJumpTask = nullptr;
+	endEngine();
 	s_status = err.getCode() == Common::kNoError ? "" : err.getDesc().c_str();
 	printf("[scummvm] engine done: %s\n", s_status.empty() ? "ok" : s_status.c_str());
 	s_running = false;
-	s_engineTask = nullptr;
-	vTaskDelete(nullptr);
+	vTaskSuspend(nullptr); // deleted by scummvm_stop()
 }
 
 } // namespace
 
-bool scummvm_start(const std::string &game_dir) {
+static bool start(const std::string &game_dir, bool paused) {
 	if (s_running)
 		return false;
 	if (!s_system) {
@@ -531,12 +589,13 @@ bool scummvm_start(const std::string &game_dir) {
 	s_status.clear();
 	s_system->_quit = false;
 	s_system->quitRequested = false;
-	s_system->pauseRequested = false;
+	s_system->pauseRequested = paused;
 	s_system->getMixer()->stopAll();
 	auto &emu = BoxEmu::get();
 	emu.audio_sample_rate(kSampleRate);
 	emu.audio_max_wait_ms(30);
 	s_audioStop = false;
+	s_audioDone = false;
 	s_running = true;
 	xTaskCreatePinnedToCoreWithCaps(audioTask, "svm_audio", 6 * 1024, nullptr, 15, &s_audioTask, 1,
 	                                MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
@@ -548,6 +607,8 @@ bool scummvm_start(const std::string &game_dir) {
 	}
 	return true;
 }
+
+bool scummvm_start(const std::string &game_dir) { return start(game_dir, false); }
 
 bool scummvm_running() { return s_running; }
 
@@ -581,18 +642,43 @@ static bool request(OSystem_Esp32::Request r, const std::string &path, int slot)
 
 bool scummvm_save(const std::string &path, int slot) { return request(OSystem_Esp32::Request::SAVE, path, slot); }
 
-bool scummvm_load(const std::string &path, int slot) { return request(OSystem_Esp32::Request::LOAD, path, slot); }
+// Engines load a state best as they start (ScummVM's save_slot): the game
+// is restarted with it, parked like the one it replaces (the pause menu is up)
+bool scummvm_load(const std::string &path, int slot) {
+	if (!s_running || !s_system || path.empty() || !Common::FSNode(Common::Path(path.c_str(), '/')).exists())
+		return false;
+	const std::string dir = s_gameDir;
+	scummvm_stop();
+	s_loadPath = path;
+	s_loadSlot = slot;
+	return start(dir, true);
+}
 
 void scummvm_stop() {
 	if (s_running) {
 		s_system->quitRequested = true;
 		scummvm_resume();
-		for (int i = 0; i < 1000 && s_running; i++)
+		// (the board's buffers go when the cart does: the engine must be gone)
+		for (int i = 0; s_running; i++) {
+			if (i == 500)
+				printf("[scummvm] still waiting for the engine to quit\n");
 			vTaskDelay(pdMS_TO_TICKS(10));
+		}
 	}
-	s_audioStop = true;
-	for (int i = 0; i < 100 && s_audioTask; i++)
-		vTaskDelay(pdMS_TO_TICKS(10));
+	// the engine task has suspended itself (or never started)
+	if (s_engineTask) {
+		while (eTaskGetState(s_engineTask) != eSuspended)
+			vTaskDelay(pdMS_TO_TICKS(1));
+		vTaskDeleteWithCaps(s_engineTask);
+		s_engineTask = nullptr;
+	}
+	if (s_audioTask) {
+		s_audioStop = true;
+		while (!s_audioDone || eTaskGetState(s_audioTask) != eSuspended)
+			vTaskDelay(pdMS_TO_TICKS(1));
+		vTaskDeleteWithCaps(s_audioTask);
+		s_audioTask = nullptr;
+	}
 	BoxEmu::get().audio_sample_rate(48000);
 }
 
@@ -610,3 +696,40 @@ std::span<uint8_t> scummvm_video_buffer() {
 	const size_t n = s_system->graphics()->snapshotRgb565(dst, BoxEmu::FRAME_BUFFER_PIXELS, w, h);
 	return std::span<uint8_t>((uint8_t *)dst, n * 2);
 }
+
+/////////////////////////////////////////////////////////////////////////////
+// Allocations
+/////////////////////////////////////////////////////////////////////////////
+
+// ScummVM makes many small allocations (paths, strings, hash map nodes: an
+// index of a game's files alone is thousands), which ESP-IDF's malloc puts in
+// the scarce internal RAM. The build renames ScummVM's malloc / calloc /
+// realloc / operator new to these (psram_alloc.syms), which prefer PSRAM;
+// free() and delete take either.
+static constexpr uint32_t kPsram = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;
+
+extern "C" void *scummvm_psram_malloc(size_t size) {
+	void *p = heap_caps_malloc(size, kPsram);
+	return p ? p : heap_caps_malloc(size, MALLOC_CAP_DEFAULT);
+}
+
+extern "C" void *scummvm_psram_calloc(size_t n, size_t size) {
+	void *p = heap_caps_calloc(n, size, kPsram);
+	return p ? p : heap_caps_calloc(n, size, MALLOC_CAP_DEFAULT);
+}
+
+extern "C" void *scummvm_psram_realloc(void *ptr, size_t size) {
+	void *p = heap_caps_realloc(ptr, size, kPsram);
+	return p || size == 0 ? p : heap_caps_realloc(ptr, size, MALLOC_CAP_DEFAULT);
+}
+
+void *scummvm_psram_new(size_t size) asm("scummvm_psram_new");
+void *scummvm_psram_new(size_t size) {
+	void *p = scummvm_psram_malloc(size ? size : 1);
+	if (!p)
+		abort(); // (no exceptions)
+	return p;
+}
+
+void *scummvm_psram_new_array(size_t size) asm("scummvm_psram_new_array");
+void *scummvm_psram_new_array(size_t size) { return scummvm_psram_new(size); }
