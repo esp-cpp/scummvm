@@ -83,6 +83,12 @@ Sound::Sound(StarTrekEngine *vm) : _vm(vm) {
 }
 
 Sound::~Sound() {
+	// stop the driver first: its timer calls back into this object (and
+	// MidiDriver_ADLIB has no destructor that closes it)
+	if (_midiDriver) {
+		_midiDriver->setTimerCallback(nullptr, nullptr);
+		_midiDriver->close();
+	}
 	for (int i = 0; i < NUM_MIDI_SLOTS; i++)
 		delete _midiSlots[i].midiParser;
 	delete _midiDriver;

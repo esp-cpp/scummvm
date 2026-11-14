@@ -244,6 +244,12 @@ public:
 	friend class Console;
 
 	Common::Error run() override;
+
+	// Saving through ScummVM's API (e.g. a backend's own menu), while the
+	// game waits for input in the bridge / away mission loop. (Loading is
+	// at startup: the save_slot setting.)
+	bool canSaveGameStateCurrently(Common::U32String *msg = nullptr) override;
+	Common::Error saveGameState(int slot, const Common::String &desc, bool isAutosave = false) override;
 	Common::Error runGameMode(int mode, bool resume);
 
 	// Transporter room
@@ -670,6 +676,8 @@ public:
 
 	bool saveGame(int slot, Common::String desc);
 	bool loadGame(int slot);
+	/// waiting for input at the top of the bridge / away mission loop
+	bool _idle = false;
 
 	/**
 	 * Call this after loading "saveOrLoadMetadata" to load all the data pertaining to game

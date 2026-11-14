@@ -129,7 +129,9 @@ StarTrekEngine::StarTrekEngine(OSystem *syst, const StarTrekGameDescription *gam
 }
 
 StarTrekEngine::~StarTrekEngine() {
-	delete _activeMenu->nextMenu;
+	// (no menu yet if the game quits during the intro)
+	if (_activeMenu)
+		delete _activeMenu->nextMenu;
 	delete _activeMenu;
 
 	delete _gfx;

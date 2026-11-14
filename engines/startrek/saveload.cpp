@@ -445,3 +445,15 @@ bool saveOrLoadMetadata(Common::SeekableReadStream *in, Common::WriteStream *out
 }
 
 } // End of namespace StarTrek
+
+namespace StarTrek {
+
+bool StarTrekEngine::canSaveGameStateCurrently(Common::U32String *msg) {
+	return _idle;
+}
+
+Common::Error StarTrekEngine::saveGameState(int slot, const Common::String &desc, bool isAutosave) {
+	return saveGame(slot, desc) ? Common::kNoError : Common::kWritingFailed;
+}
+
+} // End of namespace StarTrek

@@ -997,7 +997,10 @@ void StarTrekEngine::runBridge() {
 void StarTrekEngine::handleBridgeEvents() {
 	TrekEvent event;
 
-	if (popNextEvent(&event)) {
+	_idle = true;
+	const bool gotEvent = popNextEvent(&event);
+	_idle = false;
+	if (gotEvent) {
 		if (_gameIsPaused) {
 			if (event.type == TREKEVENT_LBUTTONDOWN || event.type == TREKEVENT_KEYDOWN) {
 				_gameIsPaused = false;
