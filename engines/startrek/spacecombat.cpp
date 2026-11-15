@@ -1341,6 +1341,18 @@ void StarTrekEngine::setEnterpriseSpeed(int step) {
 		s.requestedSpeed = (int32)(((int64)step * s.maxSpeed) / 9);
 }
 
+// The speed bars on the top console (11dc:4213 draws them at 0x8f..0xa8,
+// rows 0x14 and 0x16), a little more of them to touch; only on the bridge
+bool StarTrekEngine::onSpeedBars(Common::Point p) {
+	return !_spaceFullScreen && _bridgeDisplaysShown && p.x >= 0x8a && p.x <= 0xae && p.y >= 0x12 && p.y <= 0x1c;
+}
+
+// Along them, stop to full in the keys' 10 steps
+void StarTrekEngine::setSpeedFromBars(Common::Point p) {
+	int step = CLIP((p.x - 0x8f) * 10 / 0x19, 0, 9);
+	setEnterpriseSpeed(step);
+}
+
 // Whether a point is in the space view, where the captain flies and fires
 bool StarTrekEngine::inSpaceView(Common::Point p) {
 	return _spaceFullScreen || _starfieldRect.contains(p);

@@ -327,6 +327,7 @@ public:
 	Bitmap *_phasindBitmap = nullptr;
 	int _runningLight = 0;
 	bool _bridgeDisplaysShown = false;
+	bool _draggingSpeed = false;
 
 private:
 	Common::String getSpeechSampleForNumber(int number);
@@ -732,6 +733,8 @@ public:
 	void centerEnterpriseControls();
 	void setEnterpriseSpeed(int step);
 	bool inSpaceView(Common::Point p);
+	bool onSpeedBars(Common::Point p);
+	void setSpeedFromBars(Common::Point p);
 	void fireEnterpriseWeapons(bool torpedoes, bool phasers);
 	void setRepairTarget(int16 target);
 	void resetEnterpriseSystems();

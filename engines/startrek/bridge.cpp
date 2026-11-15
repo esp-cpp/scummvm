@@ -335,9 +335,13 @@ void StarTrekEngine::handleBridgeEvents() {
 			break;
 
 		case TREKEVENT_LBUTTONDOWN:
-			// on the viewscreen the captain flies and fires (the original's
-			// ship mode), elsewhere picks his crew
-			if (inSpaceView(_gfx->getMousePos())) {
+			// on the speed bars, the speed (for touch: the original has only
+			// the keys); on the viewscreen the captain flies and fires (the
+			// original's ship mode); elsewhere he picks his crew
+			if (onSpeedBars(_gfx->getMousePos())) {
+				_draggingSpeed = true;
+				setSpeedFromBars(_gfx->getMousePos());
+			} else if (inSpaceView(_gfx->getMousePos())) {
 				steerEnterprise(_gfx->getMousePos());
 				postBridgeAction(kBridgeActionMenu, kBridgeUnk1);
 			} else {
@@ -345,8 +349,14 @@ void StarTrekEngine::handleBridgeEvents() {
 			}
 			break;
 
+		case TREKEVENT_LBUTTONUP:
+			_draggingSpeed = false;
+			break;
+
 		case TREKEVENT_MOUSEMOVE:
-			if (inSpaceView(_gfx->getMousePos()))
+			if (_draggingSpeed)
+				setSpeedFromBars(_gfx->getMousePos());
+			else if (inSpaceView(_gfx->getMousePos()))
 				steerEnterprise(_gfx->getMousePos());
 			break;
 
