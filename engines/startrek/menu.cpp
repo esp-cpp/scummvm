@@ -23,6 +23,7 @@
 #include "common/stream.h"
 #include "graphics/cursorman.h"
 
+#include "startrek/bridge.h"
 #include "startrek/graphics.h"
 #include "startrek/resource.h"
 
@@ -269,7 +270,9 @@ void StarTrekEngine::showBridgeMenu(Common::String menu, int x, int y) {
 	if (event != MENUEVENT_LCLICK_OFFBUTTON && event != MENUEVENT_RCLICK_OFFBUTTON)
 		_gfx->warpMouse(oldMousePos.x, oldMousePos.y);
 
-	handleBridgeMenu(event);
+	// the order goes to the mission first (11dc:15db)
+	if (event >= 0)
+		postBridgeAction(kBridgeActionMenu, event);
 }
 
 int StarTrekEngine::showActionMenu() {

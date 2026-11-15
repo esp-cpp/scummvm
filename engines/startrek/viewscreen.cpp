@@ -93,6 +93,7 @@ void StarTrekEngine::showFullScreenSpace() {
 	if (_spaceFullScreen)
 		return;
 	removeDrawnActorsFromScreen();
+	removeBridgeDisplays();
 	_gfx->delSprite(&_starfieldSprite);
 	_gfx->toggleMouse(false);
 	_gfx->clearScreenAndPriBuffer();
@@ -239,21 +240,73 @@ void StarTrekEngine::leaveOrbitSequence() {
 
 // Sulu, orbit (11dc:2741)
 void StarTrekEngine::orbitPlanet() {
+	setOrbit(!_enterpriseState.inOrbit, true);
+}
+
+// Enter or leave orbit, Sulu saying so or not (11dc:2741)
+void StarTrekEngine::setOrbit(bool enter, bool say) {
 	const char *enteringOrbitText = "#BRID\\B_333#Entering standard orbit.";
 	const char *leavingOrbitText = "#BRID\\B_335#Leaving orbit.";
-	bool entering = !_enterpriseState.inOrbit;
 
 	_gfx->fadeoutScreen();
 	showFullScreenSpace();
-	if (entering)
+	if (enter)
 		enterOrbitSequence();
 	else
 		leaveOrbitSequence();
 	showBridgeViewscreen();
 	renderSpace();
+	_gfx->fadeinScreen();
 
-	_enterpriseState.inOrbit = entering;
-	showTextboxBridge(kBridgeTalkerSulu, entering ? enteringOrbitText : leavingOrbitText);
+	_enterpriseState.inOrbit = enter;
+	if (say)
+		showTextboxBridge(kBridgeTalkerSulu, enter ? enteringOrbitText : leavingOrbitText);
+}
+
+// Approaching a station or a ship (11dc:371c): it appears ahead of the
+// planet, and the Enterprise slows to a stop before it. The class is the
+// object's shape: 4 ARK7, 5 Mudd's derelict, 6 the Masada, 7 the Republic.
+void StarTrekEngine::approachObject(int cls) {
+	removeShots();
+	_enterpriseState.inOrbit = true;
+	showFullScreenSpace();
+
+	deleteApproachObject();
+	_approachObject = R3();
+	_approachObject.pos = _planetR3.pos + Point3(-1000, 1000, -5000);
+	_approachObject.matrix = initMatrix();
+	_approachObject.field1e = 3;
+	_approachObject.field20 = cls;
+	_approachObject.field22 = 0xfa;
+	_approachObject.field24 = 2;
+	addR3(&_approachObject);
+
+	_enterpriseR3.matrix = initMatrix();
+	_enterpriseR3.pos = _approachObject.pos;
+	stopShip(&_enterpriseR3);
+	_cameraOnEnterprise = true;
+	int32 d = _starfieldPointDivisor;
+	_enterpriseR3.pos.z = _approachObject.pos.z - 2 * d - 0x2649;
+	int32 speed = 0xc5;
+	for (int frame = 0; frame < 100 && !shouldQuit(); frame++) {
+		renderSpace();
+		waitSpaceTick();
+		_enterpriseR3.pos.z += speed;
+		speed -= 2;
+	}
+	_enterpriseR3.pos.z = _approachObject.pos.z - 2 * d;
+	showBridgeViewscreen();
+	renderSpace();
+}
+
+// (11dc:3937)
+void StarTrekEngine::deleteApproachObject() {
+	for (int i = 0; i < NUM_SPACE_OBJECTS; i++) {
+		if (_r3List[i] == &_approachObject) {
+			delR3(&_approachObject);
+			break;
+		}
+	}
 }
 
 // The Enterprise flying past at a mission's start, its title, Kirk's

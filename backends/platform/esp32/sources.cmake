@@ -187,6 +187,7 @@ set(SCUMMVM_SOURCES
   engines/startrek/awaymission.cpp
   engines/startrek/bitmap.cpp
   engines/startrek/bridge.cpp
+  engines/startrek/bridgemissions.cpp
   engines/startrek/common.cpp
   engines/startrek/console.cpp
   engines/startrek/detection.cpp

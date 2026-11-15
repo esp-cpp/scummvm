@@ -541,21 +541,8 @@ void Room::endMission(int16 score, int16 arg1, int16 arg2) {
 	_vm->_roomIndexToLoad = 0;
 	_vm->_gameMode = GAMEMODE_BEAMUP;
 
-	if (_vm->_missionName == "DEMON") {
-		_vm->_bridgeSequenceToLoad = kSeqEndMissionDemon;
-	} else if (_vm->_missionName == "TUG") {
-		_vm->_bridgeSequenceToLoad = kSeqEndMissionTug;
-	} else if (_vm->_missionName == "LOVE") {
-		_vm->_bridgeSequenceToLoad = kSeqEndMissionLove;
-	} else if (_vm->_missionName == "MUDD") {
-		_vm->_bridgeSequenceToLoad = kSeqEndMissionMudd;
-	} else if (_vm->_missionName == "FEATHER") {
-		_vm->_bridgeSequenceToLoad = kSeqEndMissionFeather;
-	} else if (_vm->_missionName == "TRIAL") {
-		_vm->_bridgeSequenceToLoad = kSeqEndMissionTrial;
-	} else if (_vm->_missionName == "SINS") {
-		_vm->_bridgeSequenceToLoad = kSeqEndMissionSins;
-	}
+	// (the away mission's script tells the bridge how it went)
+	_vm->setAwayMissionResult(score, arg1, arg2);
 }
 
 void Room::showGameOverMenu() { // TODO: takes an optional parameter?

@@ -200,7 +200,7 @@ bool Console::Cmd_BridgeSequence(int argc, const char **argv) {
 		debugPrintf("Usage: %s <sequence ID> to start a bridge sequence\n", argv[0]);
 		return true;
 	} else {
-		_vm->_bridgeSequenceToLoad = atoi(argv[1]);
+		_vm->setBridgeHandler(atoi(argv[1]));
 		return false;
 	}
 }

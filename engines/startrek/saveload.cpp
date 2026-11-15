@@ -75,7 +75,7 @@ bool StarTrekEngine::showLoadMenu() {
 	return loadGame(slot);
 }
 
-const uint32 CURRENT_SAVEGAME_VERSION = 1;
+const uint32 CURRENT_SAVEGAME_VERSION = 2;
 
 bool StarTrekEngine::saveGame(int slot, Common::String desc) {
 	Common::String filename = getSavegameFilename(slot);
@@ -239,8 +239,13 @@ bool StarTrekEngine::saveOrLoadGameData(Common::SeekableReadStream *in, Common::
 	}
 
 	if (meta->version >= 1) {
-		ser.syncAsSint16LE(_bridgeSequenceToLoad);
+		// (was the bridge sequence to load; the missions' state below
+		// replaces it)
+		int16 bridgeSequenceToLoad = -1;
+		ser.syncAsSint16LE(bridgeSequenceToLoad);
 	}
+	if (meta->version >= 2)
+		syncSpaceState(ser);
 
 	for (int i = 0; i < NUM_OBJECTS; i++) {
 		ser.syncAsByte(_itemList[i].have);

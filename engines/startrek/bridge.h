@@ -96,50 +96,56 @@ enum BridgeTalkers {
 	kBridgeTalkerKallarax
 };
 
+// The bridge's actions (the original's queue, DS:dc9a): with the space
+// simulation's (SpaceEvent) 2, 3, 4 and 7
+enum BridgeActionType {
+	kBridgeActionTick = 0,
+	kBridgeActionMenu = 1,     // an order (BridgeMenuEvent)
+	kBridgeActionText = 5,     // a text box with a flag closed
+	kBridgeActionBeamedUp = 6  // back from an away mission
+};
+
+// The missions' handlers, numbered as the original's (DS:006c)
+enum BridgeHandler {
+	kBridgeHandlerDemonStart = 0,      // 3c13:0006
+	kBridgeHandlerMockBattle = 1,      // 3c13:0181
+	kBridgeHandlerDemonDebrief = 2,    // 3c13:03b1
+	kBridgeHandlerDemonPollux = 3,     // 3c13:0512
+	kBridgeHandlerDemonEnd = 4,        // 3c13:07b5
+	kBridgeHandlerTugStart = 5,        // 3cb2:0006
+	kBridgeHandlerTugPirate = 6,       // 3cb2:0254
+	kBridgeHandlerTugAfterBattle = 7,  // 3cb2:0540
+	kBridgeHandlerTugMasada = 8,       // 3cb2:065d
+	kBridgeHandlerTugEnd = 9,          // 3cb2:0954
+	kBridgeHandlerLoveStart = 10,      // 3ddd:000a
+	kBridgeHandlerLoveEnRoute = 11,    // 3ddd:017f
+	kBridgeHandlerLoveRomulan = 12,    // 3ddd:033e
+	kBridgeHandlerLoveAfterBattle = 13, // 3ddd:057b
+	kBridgeHandlerLoveArk7 = 14,       // 3ddd:0692
+	kBridgeHandlerLoveEnd = 15,        // 3ddd:086b
+	kBridgeHandlerMuddStart = 16,      // 3e8d:0004
+	kBridgeHandlerMuddHarlequin = 17,  // 3e8d:02d4
+	kBridgeHandlerMuddHarrapa = 18,    // 3e8d:07bb
+	kBridgeHandlerFeatherStart = 19,   // 3f59:000a
+	kBridgeHandlerFeatherOrbit = 20,   // 3f59:049e
+	kBridgeHandlerFeatherKlrta = 21,   // 3f59:0931
+	kBridgeHandlerTrialStart = 22,     // 3fed:000c
+	kBridgeHandlerTrialEnd0 = 23,      // 3fed:01e5
+	kBridgeHandlerTrialEnd1 = 24,      // 3fed:02f1
+	kBridgeHandlerTrialEnd3 = 25,      // 3fed:041a
+	kBridgeHandlerTrialEnd4 = 26,      // 3fed:0521
+	kBridgeHandlerTrialKlrta = 27,     // 3fed:06ba
+	kBridgeHandlerVengStart = 28,      // 40e6:0006
+	kBridgeHandlerVengBattle = 29,     // 40e6:05d4
+	kBridgeHandlerSinsStart = 30,      // 4074:000e
+	kBridgeHandlerSinsEnd = 31         // 4074:0307
+};
+
 enum RandomEncounterType {
 	kRandomEncounterNone = 0,
 	kRandomEncounterKlingon = 1,
 	kRandomEncounterRomulan = 2,
 	kRandomEncounterElasi = 3
-};
-
-enum BridgeSequence {
-	kSeqNone = -1,
-	// -- Chapter 1 ----
-	kSeqStartMissionDemon = 0,
-	kSeqEndMockBattle = 1,
-	kSeqShowDebriefDemon = 2,
-	kSeqArrivedAtPolluxV = 3,
-	kSeqEndMissionDemon = 4,
-	// -- Chapter 2 ----
-	kSeqStartMissionTug = 5,
-	kSeqStartElasiPirateBattle = 6,
-	kSeqArrivedAtBetaMyamid = 7,
-	kSeqApproachedTheMasada = 8,
-	kSeqEndMissionTug = 9,
-	// -- Chapter 3 ----
-	kSeqStartMissionLove = 10,
-	kSeqAfterLoveDebrief = 11,
-	kSeqStartRomulanBattle = 12,
-	kSeqAfterRomulanBattle = 13,
-	kSeqArrivedAtArk7 = 14,
-	kSeqEndMissionLove = 15,
-	// -- Chapter 4 ----
-	kSeqStartMissionMudd = 16,
-	kSeqFightElasiShipsAndContactMudd = 17,
-	kSeqEndMissionMudd = 18,
-	// -- Chapter 5 ----
-	kSeqStartMissionFeather = 19,
-	kSeqUnk20 = 20,
-	kSeqEndMissionFeather = 21,
-	kSeqStartMissionTrial = 22,
-	kSeqEndMissionTrial = 23,	// In the original, the same function was used for both start and end
-	// -- Chapter 6 ----
-	kSeqStartMissionSins = 24,
-	kSeqEndMissionSins = 25,
-	// -- Chapter 7 ----
-	kSeqStartMissionVeng = 26,
-	kSeqEndMissionVengAndGame = 27
 };
 
 } // End of namespace StarTrek

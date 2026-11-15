@@ -211,6 +211,12 @@ struct TrekEvent {
 	uint32 tick;
 };
 
+// An action of the bridge's queue (bridge.h, BridgeActionType)
+struct BridgeAction {
+	int16 type;
+	int16 data;
+};
+
 struct ComputerTopic {
 	Common::String fileName;
 	Common::String topic;
@@ -264,12 +270,63 @@ public:
 	void cleanupBridge();
 	void runBridge();
 	void setBridgeMouseCursor();
-	void playBridgeSequence(int sequenceId);
 	void handleBridgeEvents();
 	void handleBridgeComputer();
-	void showMissionPerformance(int score, int missionScoreTextId, int missionId);
 
-	int _bridgeSequenceToLoad;
+	// bridgemissions.cpp: the missions' handlers and the bridge's actions
+	void postBridgeAction(int type, int data = 0);
+	void clearBridgeActions();
+	void swallowBridgeAction();
+	void setBridgeHandler(int handler);
+	void runBridgeActions();
+	void runBridgeHandler();
+	void bridgeDefaultAction();
+	void bridgeTick();
+	void bridgeText(int talker, int textId, int flag = 0);
+	void bridgeText(int talker, const Common::String &text, int flag = 0);
+	void viewscreenTalker(const Common::String &anim);
+	void viewscreenTalkerText(const Common::String &name, int textId);
+	void viewscreenTalkerText(const Common::String &name, const Common::String &text) {
+		showTextbox(name, text, 160, 190, 44, 0);
+	}
+	void restartViewscreenTalker();
+	void removeViewscreenTalker();
+	void viewscreenMessage(const Common::String &anim, const Common::String &name, int textId);
+	int chooseBridgeOption(const int16 *textIds, int count);
+	void standingCrew(bool standing);
+	void setMission(const Common::String &name);
+	void missionFlyby(const Common::String &voice, const Common::String &title);
+	void disableEnemyWeapons(R3 *ship, bool all);
+	void enableEnemyWeapons(R3 *ship);
+	void setAwayMissionResult(int16 score, int16 maxScore, int16 endMethod);
+	void endTrialMission();
+	void endOfGame();
+	void startRandomEncounter();
+	void randomEncounterHandler();
+	void showMissionReview(int missionId, int textId, int score, int maxScore, bool removeTalker = true);
+
+	// the action queue (DS:dc9a)
+	Common::List<BridgeAction> _bridgeActions;
+	// the mission's handler (DS:005e, kBridgeHandler...), its ticks (DS:bf60)
+	// and flags (DS:bf6c)
+	int16 _bridgeHandler = 0;
+	uint32 _bridgeTicks = 0;
+	int16 _missionFlags[6] = {};
+	// the encounter's actions to wait before the hail (DS:adde)
+	int16 _encounterCountdown = 0;
+	// a cut-scene: the captain can't act (DS:0052)
+	bool _bridgeInputDisabled = false;
+	// the last away mission's score and its best (DS:b256, d1ce)
+	int16 _awayMissionScore = 0;
+	int16 _awayMissionMaxScore = 0;
+	Common::String _viewscreenTalkerAnim;
+	// the bridge's displays
+	Sprite _displaySprites[5];
+	Sprite _scannerSprite;
+	Sprite _runningLightSprite;
+	Bitmap *_phasindBitmap = nullptr;
+	int _runningLight = 0;
+	bool _bridgeDisplaysShown = false;
 
 private:
 	Common::String getSpeechSampleForNumber(int number);
@@ -278,13 +335,7 @@ private:
 	void showBridgeScreenTalkerWithMessage(int textId, Common::String talkerHeader, Common::String talkerId, bool removeTalker = true);
 	void showBridgeScreenTalkerWithMessages(Common::String texts[], Common::String talkerHeader, Common::String talkerId, bool removeTalker = true);
 	void showMissionStartEnterpriseFlyby(Common::String sequence, Common::String name);
-	void startBattle(Common::String enemyShip);
-	void wrongDestinationRandomEncounter();
-	void bridgeCrewAction(int crewId);
-	void contactTargetAction();
-	void orbitPlanetSequence(int sequenceId);
 	void negotiateWithElasiCereth();
-	void hailTheMasada();
 
 	int16 _targetPlanet;
 	int16 _currentPlanet;
@@ -620,6 +671,9 @@ public:
 	void handleBridgeMenu(int menuEvent);
 	void showStarMap();
 	void orbitPlanet();
+	void setOrbit(bool enter, bool say);
+	void approachObject(int cls);
+	void deleteApproachObject();
 
 	// viewscreen.cpp: space as the bridge's viewscreen and the full screen
 	// show it, and the 3D sequences
@@ -665,7 +719,15 @@ public:
 	void drawViewscreenStatic();
 	bool viewscreenStatic();
 	const byte *cloakTable(int level);
-	void handleSpaceEvents();
+	void handleSpaceEvent(int type, int data);
+	void syncSpaceState(Common::Serializer &ser);
+	void initBridgeDisplays();
+	void removeBridgeDisplays();
+	void updateBridgeDisplays(bool force = false);
+	void updateScanner();
+	void updateWeaponBar(int weapon, int x, int y, bool odd);
+	void displayLine(int x, int y, int len, byte color);
+	void displayBitmap(const Common::String &name, int recolor = -1);
 	void steerEnterprise(Common::Point mouse);
 	void centerEnterpriseControls();
 	void setEnterpriseSpeed(int step);
@@ -879,6 +941,8 @@ public:
 
 	// spacecombat.cpp: the enemy ships (DS:b708) and the shots (DS:7420)
 	R3 _enemyShips[NUM_ENEMY_SHIPS];
+	// the station or ship approached (DS:beac)
+	R3 _approachObject;
 	R3 _shots[NUM_SHOTS];
 	// target analysis' ship (DS:557e)
 	R3 *_targetAnalysisShip = nullptr;
@@ -890,10 +954,12 @@ public:
 	bool _extraPowerUsed = false;
 	int32 _extraPowerTicks = 0;
 	int16 _extraPower = 0;
+	// what the commendations make of it (DS:55ea, 55ec)
+	int16 _extraPowerBonus = 0x1e;
+	int16 _extraPowerDuration = 0x1c2;
 	Common::HashMap<Common::String, Bitmap *> _combatShapes;
 	byte _cloakTable[256];
 	int _cloakLevel = -1;
-	Common::List<int> _spaceEvents;
 	// Insert / Delete held: roll (DS:d19e)
 	int _rollKey = 0;
 	R3 *_r3List[NUM_SPACE_OBJECTS];

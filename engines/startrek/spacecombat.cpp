@@ -24,6 +24,7 @@
 // functions are named by address.
 
 #include "common/debug.h"
+#include "common/serializer.h"
 
 #include "startrek/bridge.h"
 #include "startrek/resource.h"
@@ -948,8 +949,8 @@ bool StarTrekEngine::boostPower() {
 	if (_extraPowerUsed)
 		return false;
 	_extraPowerUsed = true;
-	_extraPowerTicks = 0x1c2;
-	_extraPower = 0x1e;
+	_extraPowerTicks = _extraPowerDuration;
+	_extraPower = _extraPowerBonus;
 	return true;
 }
 
@@ -1267,13 +1268,13 @@ static void orthonormalize(Matrix &m) {
 
 // ---- The captain's side (segment 11dc) ----
 
+// The simulation's news, on the bridge's queue (1e8e:17b9)
 void StarTrekEngine::addSpaceEvent(int type, int data) {
-	if (_spaceEvents.size() < 16)
-		_spaceEvents.push_back(type | (data << 8));
+	postBridgeAction(type, data);
 }
 
-// The space simulation's news, from Scotty (11dc:1c82 cases 2..7)
-void StarTrekEngine::handleSpaceEvents() {
+// From Scotty (11dc:1c82 cases 2..7)
+void StarTrekEngine::handleSpaceEvent(int type, int data) {
 	static const struct {
 		int16 id;
 		const char *name;
@@ -1287,33 +1288,28 @@ void StarTrekEngine::handleSpaceEvents() {
 		{ 7, "#BRID\\SCOTENGI#Engines" }
 	};
 
-	while (!_spaceEvents.empty()) {
-		int e = _spaceEvents.front();
-		_spaceEvents.pop_front();
-		int type = e & 0xff, data = e >> 8;
-		bool fromEnterprise = data == 0 && _enterpriseR3.ship.destroyed == 0;
-		switch (type) {
-		case kSpaceEventShieldsDown:
-			if (!fromEnterprise)
+	bool fromEnterprise = data == 0 && _enterpriseR3.ship.destroyed == 0;
+	switch (type) {
+	case kSpaceEventShieldsDown:
+		if (!fromEnterprise)
+			break;
+		showTextboxBridge(kBridgeTalkerScotty, "#BRID\\BRID_S45#The shields are falling!");
+		// (the original goes on to the weapons' message too)
+		// fall through
+	case kSpaceEventWeaponsDown:
+		if (fromEnterprise)
+			showTextboxBridge(kBridgeTalkerScotty, "#BRID\\BRID_S37#Our weapons are off-line!");
+		break;
+	case kSpaceEventRepaired:
+		for (int i = 0; i < ARRAYSIZE(kRepairNames); i++) {
+			if (kRepairNames[i].id == (data & 0xff)) {
+				showTextboxBridge(kBridgeTalkerScotty, Common::String::format("%s repaired, Captain.", kRepairNames[i].name));
 				break;
-			showTextboxBridge(kBridgeTalkerScotty, "#BRID\\BRID_S45#The shields are falling!");
-			// (the original goes on to the weapons' message too)
-			// fall through
-		case kSpaceEventWeaponsDown:
-			if (fromEnterprise)
-				showTextboxBridge(kBridgeTalkerScotty, "#BRID\\BRID_S37#Our weapons are off-line!");
-			break;
-		case kSpaceEventRepaired:
-			for (int i = 0; i < ARRAYSIZE(kRepairNames); i++) {
-				if (kRepairNames[i].id == (data & 0xff)) {
-					showTextboxBridge(kBridgeTalkerScotty, Common::String::format("%s repaired, Captain.", kRepairNames[i].name));
-					break;
-				}
 			}
-			break;
-		default:
-			break;
 		}
+		break;
+	default:
+		break;
 	}
 }
 
@@ -1409,6 +1405,357 @@ void StarTrekEngine::resetEnterpriseSystems() {
 	for (int i = 0; i < kNumShipSystems; i++)
 		s.systems[i].cur = s.systems[i].max;
 	_repairTarget = -1;
+}
+
+// ---- The bridge's displays (11dc:0c77, 0f0c, 3ec7, 13e4) ----
+
+// The background's areas the displays draw in, pushed to the screen when
+// they change (11dc:08e6), inclusive
+static const int16 kDisplayRects[5][4] = {
+	{ 90, 15, 126, 21 },   // phasers' bars
+	{ 194, 15, 230, 21 },  // photon torpedoes' bars
+	{ 140, 13, 178, 22 },  // power and speed
+	{ 0, 66, 61, 107 },    // the ship from above
+	{ 257, 68, 319, 108 }  // the ship from the side
+};
+
+void StarTrekEngine::initBridgeDisplays() {
+	removeBridgeDisplays();
+	for (int i = 0; i < 5; i++) {
+		Sprite &sp = _displaySprites[i];
+		Common::Rect r(kDisplayRects[i][0], kDisplayRects[i][1], kDisplayRects[i][2] + 1, kDisplayRects[i][3] + 1);
+		initStarfieldSprite(&sp, new StubBitmap(0, 0), r);
+	}
+	// the scanner (17x17, at 0x9f,0x8c)
+	Bitmap *scanner = new Bitmap(17, 17);
+	scanner->xoffset = 8;
+	scanner->yoffset = 8;
+	_gfx->addSprite(&_scannerSprite);
+	_scannerSprite.setBitmap(scanner);
+	_scannerSprite.setXYAndPriority(0x9f, 0x8c, 2);
+	// the running light (7x2, from 0x49,0x6b)
+	Bitmap *light = new Bitmap(7, 2);
+	memset(light->pixels, 0xda, 14);
+	_gfx->addSprite(&_runningLightSprite);
+	_runningLightSprite.setBitmap(light);
+	_runningLightSprite.setXYAndPriority(0x49 + _runningLight * 8, 0x6b, 2);
+	_bridgeDisplaysShown = true;
+	updateBridgeDisplays(true);
+}
+
+void StarTrekEngine::removeBridgeDisplays() {
+	if (!_bridgeDisplaysShown)
+		return;
+	for (int i = 0; i < 5; i++)
+		_gfx->delSprite(&_displaySprites[i]);
+	_gfx->delSprite(&_scannerSprite);
+	_gfx->delSprite(&_runningLightSprite);
+	_bridgeDisplaysShown = false;
+}
+
+// A horizontal line in the background (11dc:42ee)
+void StarTrekEngine::displayLine(int x, int y, int len, byte color) {
+	if (len > 0)
+		memset(_gfx->getBackgroundPixels() + y * SCREEN_WIDTH + x, color, len);
+}
+
+// A bitmap at the place it says, its 0s clear (1da2:042d)
+void StarTrekEngine::displayBitmap(const Common::String &name, int recolor) {
+	// (kept: they're drawn every 4 ticks)
+	Bitmap *&cached = _combatShapes["bmp:" + name];
+	if (!cached) {
+		Common::MemoryReadStreamEndian *file = _resource->loadFile(name + ".BMP", 0, false);
+		if (!file)
+			return;
+		cached = new Bitmap(file, true);
+	}
+	const Bitmap &bmp = *cached;
+	int x0 = -bmp.xoffset, y0 = -bmp.yoffset;
+	byte *bg = _gfx->getBackgroundPixels();
+	for (int y = 0; y < bmp.height; y++) {
+		for (int x = 0; x < bmp.width; x++) {
+			byte b = bmp.pixels[y * bmp.width + x];
+			int sx = x0 + x, sy = y0 + y;
+			if (b && sx >= 0 && sx < SCREEN_WIDTH && sy >= 0 && sy < SCREEN_HEIGHT)
+				bg[sy * SCREEN_WIDTH + sx] = recolor >= 0 ? recolor : b;
+		}
+	}
+}
+
+// The scanner: the enemies around, seen from the Enterprise (11dc:0c77)
+void StarTrekEngine::updateScanner() {
+	Bitmap *b = _scannerSprite.bitmap;
+	memset(b->pixels, 0, 17 * 17);
+	b->pixels[8 * 17 + 8] = 0x8b;
+	static const byte kColors[4] = { 46, 120, 100, 86 };
+	for (int i = 0; i < NUM_ENEMY_SHIPS; i++) {
+		const R3 &s = _enemyShips[i];
+		if (s.field1e != 2 || s.field54 < 50)
+			continue;
+		if (s.ship.cloaked && s.ship.cloakFading >= 0x14)
+			continue;
+		int16 a = tableAtan2(s.field36.y, s.field36.x);
+		int32 hx = (int16)s.field36.x, hy = (int16)s.field36.y;
+		int16 h = (int16)sqrt((double)(hx * hx + hy * hy));
+		int16 e = tableAtan2(s.field36.z, h);
+		int16 r = fx14Mul(0x10, trekSin((0x100 - e) >> 1));
+		int px = (fx14Mul(r, trekCos(a)) + 1) / 2 + 8;
+		int py = (fx14Mul(r, -trekSin(a)) + 1) / 2 + 8;
+		if (px >= 0 && px < 17 && py >= 0 && py < 17)
+			b->pixels[py * 17 + px] = kColors[i % 4];
+	}
+	_scannerSprite.bitmapChanged = true;
+}
+
+// The weapons' reload bars and lamps (11dc:3fb1)
+void StarTrekEngine::updateWeaponBar(int weapon, int x, int y, bool odd) {
+	static const int16 kLamp[4][3] = { { 0, 0, 0 } };
+	(void)kLamp;
+	const ShipState &s = _enterpriseR3.ship;
+	const ShipSystem &mount = s.systems[kSystemWeapon0 + weapon];
+	const ShipWeapon &w = s.weapons[weapon];
+	int len = 24, srcX;
+	byte color;
+	if (!_enterpriseState.weapons) {
+		color = 0x81;
+		srcX = 0;
+	} else if (!s.weaponsArmed || mount.cur < (mount.max >> 1)) {
+		color = 0x81;
+		srcX = 0x18;
+	} else {
+		color = 0xb1 + (odd ? 1 : 0);
+		if (w.nextFire <= _frameIndex) {
+			srcX = 0x10;
+		} else {
+			len = w.interval == 0 ? 24 : 24 - (int)(((w.nextFire - _frameIndex) * 24) / (uint32)w.interval);
+			srcX = 8;
+		}
+	}
+	len = CLIP(len, 0, 24);
+	displayLine(x, y, len, color);
+	displayLine(x + len, y, 24 - len, 0x81);
+	// the lamp: a cell of PHASIND
+	if (_phasindBitmap) {
+		int srcY = x > 0xa0 ? 3 : 0;
+		byte *bg = _gfx->getBackgroundPixels();
+		for (int yy = 0; yy < 3; yy++)
+			for (int xx = 0; xx < 8; xx++)
+				bg[(y - 1 + yy) * SCREEN_WIDTH + x + 0x1b + xx] = _phasindBitmap->pixels[(srcY + yy) * _phasindBitmap->width + srcX + xx];
+	}
+}
+
+void StarTrekEngine::updateBridgeDisplays(bool force) {
+	if (!_bridgeDisplaysShown)
+		return;
+	const ShipState &e = _enterpriseR3.ship;
+
+	updateScanner();
+
+	// (11dc:3ec7) every tick: the weapons, the power, the speed
+	if (!_phasindBitmap)
+		_phasindBitmap = new Bitmap(_resource->loadBitmapFile("phasind"));
+	static const int16 kWeaponBars[4][2] = { { 196, 16 }, { 194, 20 }, { 90, 16 }, { 92, 20 } };
+	for (int i = 0; i < 4; i++)
+		updateWeaponBar(i, kWeaponBars[i][0], kWeaponBars[i][1], i & 1);
+	static const int16 kPowerBars[2][2] = { { 140, 13 }, { 140, 16 } };
+	bool boosted = _extraPowerTicks != 0;
+	for (int i = 0; i < 2; i++) {
+		const ShipSystem &sys = e.systems[8 + i];
+		int x = kPowerBars[i][0], y = kPowerBars[i][1];
+		int v = sys.cur;
+		if (boosted)
+			v += _extraPower / 2;
+		v = MIN<int>(v, sys.max);
+		int n = sys.max == 0 ? 0 : v * 0x22 / sys.max;
+		for (int k = 0; k < 2; k++) {
+			displayLine(x, y + k, n, 0xb1);
+			displayLine(x + n, y + k, 0x22 - n, 0x81);
+			displayLine(x + 0x23, y + k, 4, boosted ? 0x69 : 0x81);
+		}
+	}
+	// (11dc:4213) the speed wanted, and the speed
+	if (e.maxSpeed != 0) {
+		int n = MAX(0, (int)(((int64)e.speedTarget * 0x19) / e.maxSpeed));
+		n = MIN(n, 0x19);
+		displayLine(0x8f, 0x14, n, 0x69);
+		displayLine(0x8f + n, 0x14, 0x19 - n, 0);
+		n = MAX(0, (int)(((int64)e.speed * 0x18) / e.maxSpeed));
+		n = MIN(n, 0x18);
+		displayLine(0x90, 0x16, n, 0xba);
+		displayLine(0x90 + n, 0x16, 0x18 - n, 0);
+	}
+	for (int i = 0; i < 3; i++)
+		_displaySprites[i].bitmapChanged = true;
+
+	// (11dc:13e4) the running light, every 4th tick
+	if ((_frameIndex & 3) == 0) {
+		_runningLight = (_runningLight + 1) % 0x16;
+		_runningLightSprite.setXYAndPriority(_runningLight * 8 + 0x49, 0x6b, 2);
+	}
+
+	// (11dc:0f0c) the ship, or target analysis' ship, every 4th tick
+	if ((_frameIndex & 3) != 0 && !force)
+		return;
+	const R3 *ship = &_enterpriseR3;
+	if (_enterpriseState.targetAnalysis && _targetAnalysisShip) {
+		if (_targetAnalysisShip->field1e == 0)
+			_targetAnalysisShip = nullptr;
+		else
+			ship = _targetAnalysisShip;
+	}
+	static const char *const kClasses[] = { "ent", "klg", "ori", "rom" };
+	const char *cls = kClasses[CLIP<int>(ship->field20, 0, 3)];
+	displayBitmap(Common::String::format("t%s", cls));
+	displayBitmap(Common::String::format("s%s", cls));
+	const ShipState &s = ship->ship;
+	for (int i = 0; i < kNumShipSystems; i++) {
+		if (s.systems[i].cur * 4 < s.systems[i].max * 3) {
+			displayBitmap(Common::String::format("t%s%02d", cls, i));
+			displayBitmap(Common::String::format("s%s%02d", cls, i));
+		}
+	}
+	for (int j = 0; j < 6; j++) {
+		const ShipSystem &sh = s.shields[j];
+		int color = !s.shieldsUp ? 0xb7 : 0xb0 + ((sh.max - sh.cur) * 8) / (sh.max + 1);
+		displayBitmap(Common::String::format("%sshd%02d", cls, j), color);
+	}
+	_displaySprites[3].bitmapChanged = true;
+	_displaySprites[4].bitmapChanged = true;
+}
+
+// ---- Saved games ----
+
+static void syncShipState(Common::Serializer &ser, ShipState &s) {
+	for (int i = 0; i < 6; i++) {
+		ser.syncAsSint16LE(s.shields[i].enabled);
+		ser.syncAsSint16LE(s.shields[i].max);
+		ser.syncAsSint16LE(s.shields[i].cur);
+	}
+	for (int i = 0; i < kNumShipSystems; i++) {
+		ser.syncAsSint16LE(s.systems[i].enabled);
+		ser.syncAsSint16LE(s.systems[i].max);
+		ser.syncAsSint16LE(s.systems[i].cur);
+	}
+	ser.syncAsSint32LE(s.maxTurnRate);
+	ser.syncAsSint32LE(s.turnAccel);
+	ser.syncAsSint32LE(s.maxSpeed);
+	ser.syncAsSint32LE(s.speedAccel);
+	ser.syncAsSint32LE(s.requestedSpeed);
+	for (int i = 0; i < 3; i++)
+		ser.syncAsSint32LE(s.targetTurnRate[i]);
+	ser.syncAsSint32LE(s.speedTarget);
+	ser.syncAsSint32LE(s.speed);
+	for (int i = 0; i < 3; i++)
+		ser.syncAsSint32LE(s.turnRate[i]);
+	for (int i = 0; i < 3; i++)
+		ser.syncAsSint32LE(s.turned[i]);
+	ser.syncAsSint16LE(s.timer);
+	ser.syncAsSint16LE(s.power);
+	ser.syncAsSint16LE(s.shieldsRequested);
+	ser.syncAsSint16LE(s.shieldsUp);
+	ser.syncAsSint16LE(s.weaponsRequested);
+	ser.syncAsSint16LE(s.weaponsArmed);
+	ser.syncAsSint32LE(s.distance);
+	ser.syncAsSint32LE(s.closing);
+	ser.syncAsSint16LE(s.maneuvering);
+	ser.syncAsSint16LE(s.maneuver);
+	ser.syncAsSint16LE(s.maneuverStep);
+	for (int i = 0; i < 4; i++) {
+		ShipWeapon &w = s.weapons[i];
+		ser.syncAsUint32LE(w.nextFire);
+		ser.syncAsSint16LE(w.life);
+		ser.syncAsSint16LE(w.speed);
+		ser.syncAsSint16LE(w.interval);
+		for (int j = 0; j < 3; j++)
+			ser.syncAsSint32LE(w.offset[j]);
+		ser.syncAsSint16LE(w.kind);
+	}
+	ser.syncAsSint32LE(s.closeRange);
+	ser.syncAsSint16LE(s.canCloak);
+	ser.syncAsSint16LE(s.cloakRequested);
+	ser.syncAsSint16LE(s.cloaked);
+	ser.syncAsSint16LE(s.cloakFading);
+	ser.syncAsSint16LE(s.destroyed);
+	ser.syncAsSint16LE(s.explosionTimer);
+	ser.syncAsSint16LE(s.leaving);
+}
+
+static void syncShip(Common::Serializer &ser, R3 &r3) {
+	for (int i = 0; i < 3; i++)
+		ser.syncAsSint32LE(r3.pos[i]);
+	for (int i = 0; i < 3; i++) {
+		for (int j = 0; j < 3; j++) {
+			int16 v = r3.matrix[i][j].raw();
+			ser.syncAsSint16LE(v);
+			r3.matrix[i][j] = Fixed14::fromRaw(v);
+		}
+	}
+	ser.syncAsSint16LE(r3.field1e);
+	ser.syncAsSint16LE(r3.field20);
+	ser.syncAsSint16LE(r3.field22);
+	ser.syncAsSint16LE(r3.field24);
+	ser.syncAsSint16LE(r3.speed.x);
+	ser.syncAsSint16LE(r3.speed.y);
+	ser.syncAsSint16LE(r3.speed.z);
+	syncShipState(ser, r3.ship);
+}
+
+// The missions' state on the bridge, the Enterprise and the enemies (the
+// original saves its 3D objects too)
+void StarTrekEngine::syncSpaceState(Common::Serializer &ser) {
+	ser.syncAsSint16LE(_bridgeHandler);
+	ser.syncAsUint32LE(_bridgeTicks);
+	for (int i = 0; i < 6; i++)
+		ser.syncAsSint16LE(_missionFlags[i]);
+	ser.syncAsSint16LE(_encounterCountdown);
+	ser.syncAsByte(_bridgeInputDisabled);
+	ser.syncAsSint16LE(_awayMissionScore);
+	ser.syncAsSint16LE(_awayMissionMaxScore);
+	int16 endFlag = _missionEndFlag;
+	ser.syncAsSint16LE(endFlag);
+	_missionEndFlag = endFlag;
+	ser.syncString(_missionName);
+	ser.syncAsSint16LE(_repairTarget);
+	ser.syncAsByte(_extraPowerUsed);
+	ser.syncAsSint32LE(_extraPowerTicks);
+	ser.syncAsSint16LE(_extraPower);
+	ser.syncAsSint16LE(_extraPowerBonus);
+	ser.syncAsSint16LE(_extraPowerDuration);
+	ser.syncAsByte(_enterpriseState.shields);
+	ser.syncAsByte(_enterpriseState.weapons);
+	ser.syncAsByte(_enterpriseState.targetAnalysis);
+
+	if (ser.isLoading()) {
+		removeShots();
+		for (int i = 0; i < NUM_ENEMY_SHIPS; i++) {
+			for (int j = 0; j < NUM_SPACE_OBJECTS; j++) {
+				if (_r3List[j] == &_enemyShips[i])
+					delR3(&_enemyShips[i]);
+			}
+			_enemyShips[i] = R3();
+		}
+	}
+	Point3 pos = _enterpriseR3.pos;
+	Matrix matrix = _enterpriseR3.matrix;
+	syncShip(ser, _enterpriseR3);
+	for (int i = 0; i < NUM_ENEMY_SHIPS; i++)
+		syncShip(ser, _enemyShips[i]);
+	if (ser.isLoading()) {
+		_enterpriseR3.shipViews = true;
+		_enterpriseR3.view = -1;
+		(void)pos;
+		(void)matrix;
+		for (int i = 0; i < NUM_ENEMY_SHIPS; i++) {
+			if (_enemyShips[i].field1e == 2) {
+				_enemyShips[i].shipViews = true;
+				addR3(&_enemyShips[i]);
+			}
+		}
+		_inCombat = false;
+		for (int i = 0; i < NUM_ENEMY_SHIPS; i++)
+			_inCombat |= _enemyShips[i].field1e != 0;
+		clearBridgeActions();
+	}
 }
 
 // The space part of each tick on the bridge (11dc:1c82)

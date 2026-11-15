@@ -36,6 +36,7 @@
 #include "engines/util.h"
 #include "video/qt_decoder.h"
 
+#include "startrek/bridge.h"
 #include "startrek/console.h"
 #include "startrek/iwfile.h"
 #include "startrek/lzss.h"
@@ -137,6 +138,7 @@ StarTrekEngine::~StarTrekEngine() {
 	delete _starsFile;
 	delete[] _planetTables;
 	freeCombatShapes();
+	delete _phasindBitmap;
 	freePlanetR3(&_planetR3);
 	delete _gfx;
 	delete _sound;
@@ -176,17 +178,16 @@ Common::Error StarTrekEngine::run() {
 			playIntro();
 			initSpaceObjects();
 			_missionToLoad = "DEMON";
-			_bridgeSequenceToLoad = 0;
+			_bridgeHandler = kBridgeHandlerDemonStart;
+			_bridgeTicks = 0;
 			runGameMode(GAMEMODE_BRIDGE, false);
 		} else {
 			_missionToLoad = "DEMO";
-			_bridgeSequenceToLoad = -1;
 			runGameMode(GAMEMODE_AWAYMISSION, false);
 		}
 	} else {
 		initSpaceObjects();
 		_roomIndexToLoad = -1;
-		_bridgeSequenceToLoad = -1;
 		runGameMode(_gameMode, true);
 	}
 
@@ -260,6 +261,9 @@ Common::Error StarTrekEngine::runGameMode(int mode, bool resume) {
 				//sub_15c61();
 				_sound->stopAllVocSounds();
 				_sound->playVoc("bridloop");
+				// (11dc:3ea1) the mission hears of it
+				clearBridgeActions();
+				postBridgeAction(kBridgeActionBeamedUp);
 				continue; // Back to start of loop
 
 			default:
