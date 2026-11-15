@@ -666,10 +666,9 @@ void StarTrekEngine::bridgeCrewAction(int crewId) {
 			showTextboxBridge(kBridgeTalkerSulu, leaveOrbitText);
 		} else {
 			showStarMap();
-			if (_currentPlanet != _targetPlanet) {
-				wrongDestinationRandomEncounter();
-				// TODO: Redraw sprites
-			}
+			// TODO: the wrong star system, a random encounter (11dc:330a,
+			// wrongDestinationRandomEncounter()), once there are battles;
+			// until then, there'd be no way out of it
 		}
 		break;
 	case kBridgeTalkerSulu:
@@ -1229,10 +1228,15 @@ void StarTrekEngine::handleBridgeMenu(int menuEvent) {
 	}
 }
 
+// Chekov, navigation (11dc:2128 event 0x60): the star map, then warp
 void StarTrekEngine::showStarMap() {
-	// HACK: Move to the target planet and play its associated sequence, until the starmap code is implemented
-	_currentPlanet = _targetPlanet;
-	setStarSystemPlanet(_currentPlanet);
+	_currentPlanet = chooseStarMapDestination();
+	showBridgeViewscreen();
+	renderSpace();
+	_gfx->fadeinScreen();
+
+	if (_currentPlanet != _targetPlanet)
+		return;
 
 	switch (_targetPlanet) {
 	case kPlanetPollux:
@@ -1257,10 +1261,7 @@ void StarTrekEngine::showStarMap() {
 		// This shouldn't be called for Mission 6 (sins)
 		break;
 	}
-
-	// TODO
 }
-
 
 void StarTrekEngine::startBattle(Common::String enemyShip) {
 	// TODO

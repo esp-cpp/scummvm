@@ -634,6 +634,10 @@ public:
 	void updateBridgeViewscreen();
 	void enterOrbitSequence();
 	void leaveOrbitSequence();
+	/// The star map: the star picked (its kPlanet...)
+	int chooseStarMapDestination();
+	/// Going to warp, to the star system set
+	void warpSequence();
 	void waitSpaceTick();
 	void captainsLog();
 

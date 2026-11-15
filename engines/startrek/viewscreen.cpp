@@ -319,4 +319,170 @@ void StarTrekEngine::showMissionStartEnterpriseFlyby(Common::String sequence, Co
 	_cameraOnEnterprise = true;
 }
 
+// Where the stars are on the star map (DS:1220), a star's index its kPlanet...
+static const int16 kStarMapStars[][2] = {
+	{ 14, 16 }, { 28, 59 }, { 62, 32 }, { 102, 38 }, { 116, 33 },
+	{ 167, 18 }, { 245, 27 }, { 263, 8 }, { 294, 37 }, { 260, 63 },
+	{ 253, 118 }, { 230, 122 }, { 237, 93 }, { 220, 77 }, { 177, 62 },
+	{ 167, 111 }, { 118, 79 }, { 90, 102 }, { 73, 111 }, { 111, 124 },
+	{ 21, 95 }, { 49, 28 }, { 81, 153 }, { 40, 133 }, { 25, 121 },
+	{ 112, 159 }, { 154, 169 }, { 160, 152 }, { 184, 135 }, { 213, 166 },
+	{ 271, 165 }, { 269, 136 }, { 297, 145 }, { 303, 103 }, { 279, 111 },
+	{ 280, 85 }, { 300, 14 }, { 217, 33 }, { 218, 55 }, { 166, 85 },
+	{ 50, 44 }, { 151, 44 }, { 156, 16 }, { 83, 72 }, { 150, 102 }
+};
+
+// The star nearest a point on the map (3383:04fb)
+static int nearestStar(Common::Point p) {
+	int nearest = 0;
+	int best = 0x7fff;
+	for (int i = 0; i < ARRAYSIZE(kStarMapStars); i++) {
+		int distance = ABS(kStarMapStars[i][0] - p.x) + ABS(kStarMapStars[i][1] - p.y);
+		if (distance < best) {
+			nearest = i;
+			best = distance;
+		}
+	}
+	return nearest;
+}
+
+// The star map (11dc:269c, 3383:027e): a circle on the star nearest the
+// cursor; a click, or Enter, Space, F1 or F2, picks it
+int StarTrekEngine::chooseStarMapDestination() {
+	_gfx->fadeoutScreen();
+	showFullScreenSpace();
+	_gfx->delSprite(&_starfieldSprite);
+	_gfx->setBackgroundImage("starmap");
+	_gfx->copyBackgroundScreen();
+	_gfx->setMouseBitmap("cross");
+	_gfx->toggleMouse(true);
+
+	int star = nearestStar(_gfx->getMousePos());
+	Sprite circle;
+	_gfx->addSprite(&circle);
+	circle.setBitmap(new Bitmap(_resource->loadBitmapFile("circle")));
+	circle.setXYAndPriority(kStarMapStars[star][0], kStarMapStars[star][1], 0xe);
+	_gfx->drawAllSprites();
+	_gfx->fadeinScreen();
+
+	bool chosen = false;
+	while (!chosen && !shouldQuit()) {
+		TrekEvent event;
+		if (!popNextEvent(&event))
+			continue;
+
+		switch (event.type) {
+		case TREKEVENT_TICK:
+			_frameIndex++;
+			break;
+		case TREKEVENT_MOUSEMOVE:
+		case TREKEVENT_LBUTTONDOWN:
+			// (a touch moves the circle as it picks)
+			star = nearestStar(_gfx->getMousePos());
+			circle.setXYAndPriority(kStarMapStars[star][0], kStarMapStars[star][1], 0xe);
+			_gfx->drawAllSprites();
+			chosen = event.type == TREKEVENT_LBUTTONDOWN;
+			break;
+		case TREKEVENT_RBUTTONDOWN:
+			chosen = true;
+			break;
+		case TREKEVENT_KEYDOWN:
+			switch (event.kbd.keycode) {
+			case Common::KEYCODE_RETURN:
+			case Common::KEYCODE_KP_ENTER:
+			case Common::KEYCODE_SPACE:
+			case Common::KEYCODE_F1:
+			case Common::KEYCODE_F2:
+				chosen = true;
+				break;
+			default:
+				break;
+			}
+			break;
+		default:
+			break;
+		}
+	}
+
+	circle.dontDrawNextFrame();
+	_gfx->drawAllSprites();
+	_gfx->delSprite(&circle);
+	_gfx->popMouseBitmap();
+	_gfx->toggleMouse(false);
+	initStarfieldSprite(&_starfieldSprite, new StubBitmap(0, 0), _starfieldRect);
+
+	setStarSystemPlanet(star);
+	warpSequence();
+	_gfx->loadPalette("bridge");
+	return star;
+}
+
+// Going to warp (346c:0006): the camera, ahead of the Enterprise and to its
+// side, turns to watch it fly past; it turns, flashes into warp and is
+// gone. The Enterprise is then where the camera was, facing its way.
+void StarTrekEngine::warpSequence() {
+	_gfx->fadeoutScreen();
+	_gfx->clearScreenAndPriBuffer();
+	_cameraOnEnterprise = false;
+
+	_enterpriseR3.pos = Point3(0, 0, 0);
+	_enterpriseR3.matrix = initMatrix();
+	trekPreRotateY(_enterpriseR3.matrix, 0x100);
+	Point3 camera;
+	for (int i = 0; i < 3; i++) {
+		camera[i] = _enterpriseR3.pos[i] + (((int32)_enterpriseR3.matrix[2][i].raw() * 2000) >> 14)
+			+ (((int32)_enterpriseR3.matrix[0][i].raw() * 500) >> 14);
+	}
+	Matrix cameraMatrix = _enterpriseR3.matrix;
+	_starfieldPosition = camera;
+
+	_sound->playMidiMusicTracks(MIDITRACK_12);
+
+	R3 flash;
+	flash.matrix = initMatrix();
+	flash.field1e = 3;
+	flash.field22 = 0xe1;
+	flash.field24 = 0x15;
+
+	for (int t = 0; t != 0x40 && !shouldQuit(); t++) {
+		// (2f0d:245f) the camera turns to the Enterprise
+		Point3 d = matrixMult(_enterpriseR3.pos - camera, cameraMatrix.invert());
+		trekPreRotateY(cameraMatrix, trekAtan2(d.x, d.z));
+		_someMatrix = cameraMatrix;
+
+		if (t < 0x30)
+			trekPreRotateY(_enterpriseR3.matrix, -1);
+		for (int i = 0; i < 3; i++)
+			_enterpriseR3.pos[i] += ((int32)_enterpriseR3.matrix[2][i].raw() * 100) >> 14;
+
+		if (t == 0x34)
+			delR3(&_enterpriseR3);
+		if (t == 0x2c)
+			_sound->playSoundEffectIndex(kSfxWarp);
+		if (t >= 0x30) {
+			// the flash, where the Enterprise is
+			flash.pos = _enterpriseR3.pos;
+			delete flash.bitmap;
+			flash.bitmap = new Bitmap(_resource->loadBitmapFile(Common::String::format("warp%02d", t - 0x30)));
+			if (t == 0x30)
+				addR3(&flash);
+		}
+
+		_gfx->incPaletteFadeLevel();
+		renderSpace();
+		waitSpaceTick();
+	}
+
+	_gfx->fadeoutScreen();
+	_gfx->clearScreenAndPriBuffer();
+	delR3(&flash);
+
+	_enterpriseR3.pos = camera;
+	_enterpriseR3.matrix = cameraMatrix;
+	addR3(&_enterpriseR3);
+	_enterpriseR3.field1e = 2;
+	_cameraOnEnterprise = true;
+	_sound->playVoc("bridloop");
+}
+
 } // End of namespace StarTrek
