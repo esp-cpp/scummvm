@@ -3,3 +3,8 @@ calloc scummvm_psram_calloc
 realloc scummvm_psram_realloc
 _Znwj scummvm_psram_new
 _Znaj scummvm_psram_new_array
+free scummvm_psram_free
+_ZdlPv scummvm_psram_delete
+_ZdaPv scummvm_psram_delete_array
+_ZdlPvj scummvm_psram_delete_sized
+_ZdaPvj scummvm_psram_delete_array_sized

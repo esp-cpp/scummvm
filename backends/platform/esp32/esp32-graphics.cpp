@@ -26,7 +26,6 @@
 #include "common/system.h"
 #include "common/textconsole.h"
 
-#include <esp_heap_caps.h>
 
 #include "box-emu.hpp"
 
@@ -36,20 +35,54 @@ static inline uint16_t rgb565(byte r, byte g, byte b) {
 	return (uint16_t)(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
 }
 
-static void *psramAlloc(size_t bytes) {
-	return heap_caps_calloc(1, bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-}
+// (the allocator of ScummVM's own: the running game's arena, else PSRAM)
+extern "C" void *scummvm_psram_calloc(size_t n, size_t size);
+extern "C" void scummvm_psram_free(void *p);
+static void *psramAlloc(size_t bytes) { return scummvm_psram_calloc(1, bytes); }
+static void psramFree(void *p) { scummvm_psram_free(p); }
 
+// (the overlay's pixels come with the first use: a build without the GUI
+// never shows it)
 Esp32GraphicsManager::Esp32GraphicsManager() {
-	_overlay.init(320, 200, 320 * 2, psramAlloc(320 * 200 * 2), kRgb565);
+	_overlay.init(320, 200, 320 * 2, nullptr, kRgb565);
 }
 
 Esp32GraphicsManager::~Esp32GraphicsManager() {
-	heap_caps_free(_screen.getPixels());
-	heap_caps_free(_overlay.getPixels());
-	heap_caps_free(_out[0]);
-	heap_caps_free(_out[1]);
-	heap_caps_free(_cursor);
+	release();
+}
+
+void Esp32GraphicsManager::release() {
+	psramFree(_screen.getPixels());
+	_screen.setPixels(nullptr);
+	_screen.w = _screen.h = 0;
+	psramFree(_overlay.getPixels());
+	_overlay.setPixels(nullptr);
+	_overlayVisible = false;
+	psramFree(_out[0]);
+	psramFree(_out[1]);
+	_out[0] = _out[1] = nullptr;
+	_outBytes = 0;
+	psramFree(_cursor);
+	_cursor = nullptr;
+	_cursorW = _cursorH = 0;
+	_cursorVisible = false;
+}
+
+bool Esp32GraphicsManager::ensureOut(size_t bytes) {
+	if (bytes <= _outBytes)
+		return true;
+	psramFree(_out[0]);
+	psramFree(_out[1]);
+	_out[0] = (byte *)psramAlloc(bytes);
+	_out[1] = (byte *)psramAlloc(bytes);
+	_outBytes = _out[0] && _out[1] ? bytes : 0;
+	return _outBytes != 0;
+}
+
+bool Esp32GraphicsManager::ensureOverlay() {
+	if (!_overlay.getPixels())
+		_overlay.setPixels(psramAlloc((size_t)_overlay.w * _overlay.h * 2));
+	return _overlay.getPixels() && ensureOut((size_t)_overlay.w * _overlay.h * 2);
 }
 
 bool Esp32GraphicsManager::hasFeature(OSystem::Feature f) const {
@@ -74,17 +107,9 @@ void Esp32GraphicsManager::initSize(uint width, uint height, const Graphics::Pix
 		_dirty = true;
 		return;
 	}
-	heap_caps_free(_screen.getPixels());
+	psramFree(_screen.getPixels());
 	_screen.init(width, height, width, psramAlloc(width * height), Graphics::PixelFormat::createFormatCLUT8());
-	// the composed frames hold the overlay too (RGB565)
-	const size_t bytes = MAX<size_t>(width * height, (size_t)_overlay.w * _overlay.h * 2);
-	if (bytes > _outBytes) {
-		heap_caps_free(_out[0]);
-		heap_caps_free(_out[1]);
-		_out[0] = (byte *)psramAlloc(bytes);
-		_out[1] = (byte *)psramAlloc(bytes);
-		_outBytes = bytes;
-	}
+	ensureOut((size_t)width * height);
 	_screenChangeId++;
 	_dirty = true;
 	if (!_overlayVisible)
@@ -197,7 +222,7 @@ void Esp32GraphicsManager::present() {
 	_dirty = false;
 	byte *out = _out[_outIndex];
 	_outIndex ^= 1;
-	if (_overlayVisible) {
+	if (_overlayVisible && _overlay.getPixels()) {
 		uint16_t *dst = (uint16_t *)out;
 		memcpy(dst, _overlay.getPixels(), (size_t)_overlay.w * _overlay.h * 2);
 		if (_cursorVisible && _cursor)
@@ -237,7 +262,7 @@ size_t Esp32GraphicsManager::snapshotRgb565(uint16_t *dst, size_t maxPixels, int
 }
 
 void Esp32GraphicsManager::showOverlay(bool inGUI) {
-	if (_overlayVisible)
+	if (_overlayVisible || !ensureOverlay())
 		return;
 	_overlayVisible = true;
 	// the GUI works in overlay coordinates
@@ -262,17 +287,23 @@ Graphics::PixelFormat Esp32GraphicsManager::getOverlayFormat() const {
 }
 
 void Esp32GraphicsManager::clearOverlay() {
+	if (!ensureOverlay())
+		return;
 	memset(_overlay.getPixels(), 0, (size_t)_overlay.w * _overlay.h * 2);
 	_dirty = true;
 }
 
 void Esp32GraphicsManager::grabOverlay(Graphics::Surface &surface) const {
 	assert(surface.w >= _overlay.w && surface.h >= _overlay.h);
+	if (!_overlay.getPixels())
+		return;
 	for (int y = 0; y < _overlay.h; y++)
 		memcpy(surface.getBasePtr(0, y), _overlay.getBasePtr(0, y), _overlay.w * 2);
 }
 
 void Esp32GraphicsManager::copyRectToOverlay(const void *buf, int pitch, int x, int y, int w, int h) {
+	if (!ensureOverlay())
+		return;
 	_overlay.copyRectToSurface(buf, pitch, x, y, w, h);
 	_dirty = true;
 }
@@ -297,7 +328,7 @@ void Esp32GraphicsManager::setMouseCursor(const void *buf, uint w, uint h, int h
 		return;
 	}
 	if (w * h > _cursorW * _cursorH || !_cursor) {
-		heap_caps_free(_cursor);
+		psramFree(_cursor);
 		_cursor = (byte *)psramAlloc(MAX<uint>(1, w * h));
 	}
 	memcpy(_cursor, buf, w * h);

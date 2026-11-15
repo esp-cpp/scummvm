@@ -91,12 +91,17 @@ public:
 	size_t snapshotRgb565(uint16_t *dst, size_t maxPixels, int &w, int &h) const;
 	/// Re-send the palette and the frame (the board's menu drew over them)
 	void refresh();
+	/// Free the screen, overlay, frame and cursor buffers (a game ended: the
+	/// next one makes them again)
+	void release();
 
 private:
 	void present();
 	void drawCursor8(byte *dst, int pitch, int w, int h) const;
 	void drawCursor16(uint16_t *dst, int pitch, int w, int h) const;
 	void applyNativeSize();
+	bool ensureOut(size_t bytes);
+	bool ensureOverlay();
 
 	Graphics::Surface _screen;   // CLUT8, the game's
 	Graphics::Surface _overlay;  // RGB565, the GUI's

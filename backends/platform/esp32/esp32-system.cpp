@@ -47,6 +47,10 @@
 #include "common/queue.h"
 #include "common/savefile.h"
 #include "engines/engine.h"
+#include "audio/musicplugin.h"
+#include "graphics/cursorman.h"
+#include "graphics/fontman.h"
+#include "gui/gui-manager.h"
 #include "engines/metaengine.h"
 
 #include <atomic>
@@ -64,6 +68,11 @@
 
 #include "box-emu.hpp"
 #include "scummvm_port.hpp"
+
+// esp32-alloc.cpp
+bool scummvm_arena_begin(void *block, size_t size);
+void scummvm_arena_stop();
+size_t scummvm_arena_end();
 
 namespace {
 
@@ -502,6 +511,8 @@ void endEngine() {
 		ConfMan.removeGameDomain(s_run.target);
 	s_run.target.clear();
 	g_system->getMixer()->stopAll();
+	// (the board's other games want the PSRAM)
+	s_system->graphics()->release();
 }
 
 // Detect the game and make its engine (into s_run). Nothing of this stays on
@@ -557,10 +568,39 @@ Common::Error createEngine() {
 	return Common::kNoError;
 }
 
+// The game's arena (esp32-alloc.cpp): what the game allocates while it
+// runs, given back whole when it ends
+uint8_t *s_arenaBlock = nullptr;
+constexpr size_t kArenaMax = 6 * 1024 * 1024;
+constexpr size_t kArenaMin = 1024 * 1024;
+constexpr size_t kArenaMargin = 1024 * 1024; // for the rest of the board meanwhile
+
+void beginArena() {
+	const size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM);
+	const size_t size = largest > kArenaMargin + kArenaMin ? MIN(kArenaMax, largest - kArenaMargin) : 0;
+	if (size)
+		s_arenaBlock = (uint8_t *)heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+	if (!s_arenaBlock || !scummvm_arena_begin(s_arenaBlock, size)) {
+		printf("[scummvm] no arena (largest PSRAM block %u B): the game uses the heap\n", (unsigned)largest);
+		heap_caps_free(s_arenaBlock);
+		s_arenaBlock = nullptr;
+	}
+}
+
+void endArena() {
+	if (!s_arenaBlock)
+		return;
+	// (what's left are the locals of the frames OSystem::quit() jumped over)
+	scummvm_arena_end();
+	heap_caps_free(s_arenaBlock);
+	s_arenaBlock = nullptr;
+}
+
 Common::Error runEngine() {
 	const Common::Error err = createEngine();
 	if (err.getCode() != Common::kNoError)
 		return err;
+	beginArena();
 	g_system->engineInit();
 	g_system->getEventManager()->purgeKeyboardEvents();
 	g_system->getEventManager()->purgeMouseEvents();
@@ -573,7 +613,10 @@ void engineTask(void *) {
 	if (setjmp(s_quitJump) == 0)
 		err = runEngine();
 	s_quitJumpTask = nullptr;
+	// the clean-up's own allocations (if any) must outlive the arena
+	scummvm_arena_stop();
 	endEngine();
+	endArena();
 	scummvm_alloc_report("/sdcard/saves/scummvm_leaks.txt");
 	s_status = err.getCode() == Common::kNoError ? "" : err.getDesc().c_str();
 	printf("[scummvm] engine done: %s\n", s_status.empty() ? "ok" : s_status.c_str());
@@ -583,10 +626,10 @@ void engineTask(void *) {
 
 } // namespace
 
-static bool start(const std::string &game_dir, bool paused) {
-	if (s_running)
-		return false;
-	if (!s_system) {
+void scummvm_prepare() {
+	if (s_system)
+		return;
+	{
 		s_system = new OSystem_Esp32();
 		g_system = s_system;
 		s_system->initBackend();
@@ -594,8 +637,25 @@ static bool start(const std::string &game_dir, bool paused) {
 		PluginManager::instance().loadAllPlugins();
 		PluginManager::instance().loadDetectionPlugin();
 		ConfMan.loadDefaultConfigFile(Common::Path());
+		// singletons a game would otherwise make in its arena (which goes
+		// when the game ends): made now, in the heap
+		GUI::GuiManager::instance();
+		FontMan.getFontByUsage(Graphics::FontManager::kGUIFont);
+		MusicMan.getPlugins();
+		CursorMan.isVisible();
+		// and the ones a game's set-up makes (outside the arena: ~10 KB in
+		// the middle of the heap otherwise, splitting its biggest block)
+		SearchMan.clear();
+		EngineMan.getPlugins(PLUGIN_TYPE_ENGINE);
+		DebugMan.getDebugChannels();
 		ConfMan.set("savepath", "/sdcard/saves", Common::ConfigManager::kApplicationDomain);
 	}
+}
+
+static bool start(const std::string &game_dir, bool paused) {
+	if (s_running)
+		return false;
+	scummvm_prepare();
 	s_gameDir = game_dir;
 	s_status.clear();
 	scummvm_alloc_new_generation();

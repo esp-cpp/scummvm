@@ -55,5 +55,8 @@
 /* no ScummVM GUI (gui/): its few entry points are stubbed by the backend
  * (backends/platform/esp32/gui-stubs.cpp) */
 #define SCUMMVM_NO_GUI
+/* Common::String ref counts are malloc()ed, not pooled: the backend gives a
+ * game's memory back whole when it ends (esp32-alloc.cpp) */
+#define SCUMMVM_STRING_REFCOUNT_MALLOC
 
 #endif /* CONFIG_H */

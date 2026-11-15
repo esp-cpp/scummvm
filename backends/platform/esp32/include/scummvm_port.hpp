@@ -9,6 +9,10 @@
 #include <string>
 #include <utility>
 
+/// ScummVM's one-time set-up (its OSystem, plugins, settings, singletons);
+/// done by the first scummvm_start() too. Early, its allocations stay out of
+/// the way of the big blocks the board's games want.
+void scummvm_prepare();
 /// Detect the game in `game_dir` and start it; false if it can't start
 bool scummvm_start(const std::string &game_dir);
 /// True until the engine has finished
