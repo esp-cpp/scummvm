@@ -472,25 +472,25 @@ void StarTrekEngine::drawR3Shape(R3 *r3) {
 				if (rowWidth == 0)
 					continue;
 
-				if (var3fa) {
-					srcX += 0x80;
-					srcY += 0x80;
+				// TODO: the original draws close shapes (!var3fa) with a
+				// different, unimplemented, routine; they're drawn like distant
+				// ones here (a warning for each row instead stalled games whose
+				// console is slow)
+				srcX += 0x80;
+				srcY += 0x80;
 
-					int16 cx = srcX;
-					int16 bx = srcY;
-					byte *di = bgPixels2;
+				int16 cx = srcX;
+				int16 bx = srcY;
+				byte *di = bgPixels2;
 
-					for (int a = 0; a < rowWidth; a++) {
-						byte b = tmpBitmap.pixels[(bx & 0xff00) + (cx >> 8)];
-						cx += xDiff;
-						bx += yDiff;
-						if (b == 0)
-							di++;
-						else
-							*(di++) = b;
-					}
-				} else {
-					warning("Unimplemented branch in \"drawR3Shape\"");
+				for (int a = 0; a < rowWidth; a++) {
+					byte b = tmpBitmap.pixels[(bx & 0xff00) + (cx >> 8)];
+					cx += xDiff;
+					bx += yDiff;
+					if (b == 0)
+						di++;
+					else
+						*(di++) = b;
 				}
 			}
 
@@ -510,7 +510,10 @@ bool StarTrekEngine::sub_1c022(R3 *r3) {
 	//Point3 point = r3->field36;
 	//if (point.z < _flt_50898)
 	//	return false;
-	return true; // TODO: finish this properly
+	// TODO: finish this properly (_flt_50898's value). At least nothing
+	// behind the camera is drawn: the intro puts the planet there (z = -1),
+	// which projected it, flipped and huge, over the whole starfield.
+	return r3->field36.z > 0;
 }
 
 Point3 StarTrekEngine::constructPoint3ForStarfield(int16 x, int16 y, int16 z) {
