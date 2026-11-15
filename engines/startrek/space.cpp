@@ -29,23 +29,26 @@ void StarTrekEngine::initStarfieldPosition() {
 	_someMatrix = initMatrix();
 }
 
-void StarTrekEngine::initStarfield(int16 x, int16 y, int16 width, int16 height, int16 arg8) {
-	// TODO: finish
-	_starfieldXVar1 = (x + width) / 2;
-	_starfieldYVar1 = (y + height) / 2;
-	_starfieldXVar2 = (width - x + 1) / 2;
-	_starfieldYVar2 = (height - y + 1) / 2;
+// (1972:0028) The starfield in (x1, y1) - (x2, y2), inclusive, with a field
+// of view of fov (1/1024ths of a turn, each side of the middle)
+void StarTrekEngine::initStarfield(int16 x1, int16 y1, int16 x2, int16 y2, int16 fov) {
+	_starfieldXVar1 = (x1 + x2) / 2;
+	_starfieldYVar1 = (y1 + y2) / 2;
+	_starfieldXVar2 = (x2 - x1 + 1) / 2;
+	_starfieldYVar2 = (y2 - y1 + 1) / 2;
 
 	_starfieldRect.left = _starfieldXVar1 - _starfieldXVar2;
-	_starfieldRect.right = _starfieldXVar1 + _starfieldXVar2;
+	_starfieldRect.right = _starfieldXVar1 + _starfieldXVar2 + 1;
 	_starfieldRect.top = _starfieldYVar1 - _starfieldYVar2;
-	_starfieldRect.bottom = _starfieldYVar1 + _starfieldYVar2;
+	_starfieldRect.bottom = _starfieldYVar1 + _starfieldYVar2 + 1;
 
 	for (uint i = 0; i < ARRAYSIZE(_starList); i++) {
 		_starList[i].active = false;
 		_starList[i].pos = Point3(0, 0, 0);
 	}
-	_starfieldPointDivisor = 150;
+	// (half the width over the tangent of the field of view)
+	int16 tangent = (int16)round(tan(CLIP<int>(fov, 1, 0x80) * (2 * M_PI / 1024)) * 16384);
+	_starfieldPointDivisor = ((int32)_starfieldXVar2 << 14) / tangent;
 	_flt_50898 = 50.0;
 }
 
@@ -87,7 +90,10 @@ void StarTrekEngine::drawStarfield() {
 	int16 yvar = var2a / 2;
 	int16 var8 = _starfieldPointDivisor << 3;
 
-	Common::MemoryReadStreamEndian *file = _resource->loadFile("stars.shp");
+	if (!_starsFile)
+		_starsFile = _resource->loadFile("stars.shp");
+	Common::MemoryReadStreamEndian *file = _starsFile;
+	file->seek(0, SEEK_SET);
 
 	for (int i = 0; i < NUM_STARS; i++) {
 		Star *star = &_starList[i];
@@ -135,7 +141,6 @@ void StarTrekEngine::drawStarfield() {
 		}
 	}
 
-	delete file;
 }
 
 /**
@@ -234,27 +239,123 @@ R3 *StarTrekEngine::sub_19f24(R3 *r3) {
 
 // The original's trigonometry: angles in 1/1024ths of a turn, values 2.14
 // fixed point.
-static int16 trekSin(int angle) {
+int16 trekSin(int angle) {
 	return (int16)round(sin((angle & 0x3ff) * (2 * M_PI / 1024)) * 16384);
 }
 
-static int16 trekCos(int angle) {
+int16 trekCos(int angle) {
 	return trekSin(angle + 0x100);
 }
 
 // atan2(y, x) in (-0x200, 0x200]
-static int16 trekAtan2(int32 y, int32 x) {
+int16 trekAtan2(int32 y, int32 x) {
 	if (x == 0 && y == 0)
 		return 0;
 	return (int16)round(atan2((double)y, (double)x) * (512 / M_PI));
 }
 
-static int16 trekAcos(int16 v) {
+int16 trekAcos(int16 v) {
 	return (int16)round(acos(CLIP<int>(v, -16384, 16384) / 16384.0) * (512 / M_PI));
 }
 
-static int16 trekAsin(int16 v) {
+int16 trekAsin(int16 v) {
 	return (int16)round(asin(CLIP<int>(v, -16384, 16384) / 16384.0) * (512 / M_PI));
+}
+
+static int16 raw(const Matrix &m, int i, int j) {
+	return m[i][j].raw();
+}
+
+static void setRaw(Matrix &m, int i, int j, int32 v) {
+	m[i][j] = Fixed14::fromRaw((int16)v);
+}
+
+Matrix trekMatrixMultiply(const Matrix &a, const Matrix &b) {
+	Matrix out;
+	for (int i = 0; i < 3; i++)
+		for (int j = 0; j < 3; j++) {
+			int32 sum = 0;
+			for (int k = 0; k < 3; k++)
+				sum += (int32)raw(a, i, k) * raw(b, k, j);
+			setRaw(out, i, j, sum >> 14);
+		}
+	return out;
+}
+
+static Matrix rotationY(int16 angle) {
+	Matrix r;
+	int16 c = trekCos(angle), s = trekSin(angle);
+	setRaw(r, 0, 0, c);
+	setRaw(r, 0, 2, -s);
+	setRaw(r, 1, 1, 0x4000);
+	setRaw(r, 2, 0, s);
+	setRaw(r, 2, 2, c);
+	return r;
+}
+
+static Matrix rotationX(int16 angle) {
+	Matrix r;
+	int16 c = trekCos(angle), s = trekSin(angle);
+	setRaw(r, 0, 0, 0x4000);
+	setRaw(r, 1, 1, c);
+	setRaw(r, 1, 2, s);
+	setRaw(r, 2, 1, -s);
+	setRaw(r, 2, 2, c);
+	return r;
+}
+
+void trekPreRotateY(Matrix &m, int16 angle) {
+	m = trekMatrixMultiply(rotationY(angle), m);
+}
+
+void trekPreRotateX(Matrix &m, int16 angle) {
+	m = trekMatrixMultiply(rotationX(angle), m);
+}
+
+void trekPostRotateY(Matrix &m, int16 angle) {
+	m = trekMatrixMultiply(m, rotationY(angle));
+}
+
+void trekPostRotateX(Matrix &m, int16 angle) {
+	m = trekMatrixMultiply(m, rotationX(angle));
+}
+
+int32 trekLength(const Point3 &p) {
+	double x = (int16)p.x, y = (int16)p.y, z = (int16)p.z;
+	return (int32)round(sqrt(x * x + y * y + z * z));
+}
+
+// v / its length, 2.14 fixed point (the components' low 16 bits)
+static bool normalize(const int32 v[3], int16 out[3]) {
+	double x = (int16)v[0], y = (int16)v[1], z = (int16)v[2];
+	int32 len = (int32)round(sqrt(x * x + y * y + z * z));
+	for (int i = 0; i < 3; i++)
+		out[i] = len ? (int16)CLIP<int32>((int32)(int16)v[i] * 16384 / len, -32768, 32767) : 0;
+	return len != 0;
+}
+
+static void cross(const int16 a[3], const int16 b[3], int16 out[3]) {
+	out[0] = (int16)(((int32)a[1] * b[2] - (int32)a[2] * b[1]) >> 14);
+	out[1] = (int16)(((int32)a[2] * b[0] - (int32)a[0] * b[2]) >> 14);
+	out[2] = (int16)(((int32)a[0] * b[1] - (int32)a[1] * b[0]) >> 14);
+}
+
+bool trekLookAt(const Point3 &dir, const Point_Fixed14 &up, Matrix &out) {
+	int32 d[3] = { dir.x, dir.y, dir.z };
+	int16 z[3], x[3], y[3];
+	if (!normalize(d, z))
+		return false;
+	int16 u[3] = { up.x.raw(), up.y.raw(), up.z.raw() };
+	cross(u, z, x);
+	int32 xl[3] = { x[0], x[1], x[2] };
+	normalize(xl, x);
+	cross(z, x, y);
+	for (int j = 0; j < 3; j++) {
+		setRaw(out, 0, j, x[j]);
+		setRaw(out, 1, j, y[j]);
+		setRaw(out, 2, j, z[j]);
+	}
+	return true;
 }
 
 // (a * b + c * d) >> 14, as 16 bits
@@ -271,6 +372,218 @@ static int16 fx14Div(int32 a, int32 b) {
 	if (b == 0)
 		return 0;
 	return (int16)CLIP<int32>((int32)(int16)a * 16384 / (int16)b, -32768, 32767);
+}
+
+// The colour ramps planets' textures are coloured with (25 shades each)
+static const byte kPlanetRamps[22][25] = {
+	{ 115, 110, 105, 100, 162, 163, 164, 165, 152, 153, 154, 155, 156, 157, 158, 159, 203, 202, 201, 200, 199, 198, 197, 196, 195 },
+	{ 99, 192, 193, 194, 195, 196, 197, 198, 199, 200, 201, 202, 200, 150, 151, 152, 153, 154, 155, 167, 157, 158, 175, 174, 173 },
+	{ 140, 139, 138, 137, 136, 135, 134, 133, 132, 131, 130, 129, 128, 127, 128, 129, 130, 29, 168, 169, 170, 171, 172, 173, 174 },
+	{ 120, 216, 217, 218, 219, 176, 177, 178, 179, 180, 149, 150, 151, 152, 153, 154, 156, 157, 158, 159, 34, 169, 171, 172, 173 },
+	{ 139, 137, 135, 134, 133, 132, 131, 7, 35, 10, 11, 40, 46, 95, 90, 176, 177, 85, 180, 56, 37, 34, 169, 171, 172 },
+	{ 138, 136, 134, 74, 72, 73, 70, 69, 65, 63, 5, 36, 11, 40, 46, 95, 90, 66, 198, 37, 34, 169, 171, 172, 173 },
+	{ 140, 139, 138, 137, 136, 135, 134, 133, 132, 131, 130, 129, 128, 129, 130, 131, 132, 133, 134, 135, 136, 136, 137, 138, 139 },
+	{ 165, 152, 153, 154, 155, 156, 157, 158, 159, 191, 190, 189, 188, 187, 186, 185, 184, 169, 170, 171, 172, 173, 174, 175, 175 },
+	{ 164, 163, 162, 163, 164, 165, 166, 167, 166, 165, 164, 163, 162, 163, 164, 163, 162, 163, 164, 165, 166, 167, 166, 165, 164 },
+	{ 137, 138, 139, 140, 99, 49, 152, 153, 154, 155, 156, 191, 190, 189, 188, 187, 186, 185, 184, 170, 171, 172, 173, 174, 174 },
+	{ 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 159, 158, 157, 156, 155, 154, 153, 152, 151, 150 },
+	{ 175, 1, 1, 128, 128, 1, 1, 167, 1, 1, 128, 128, 1, 1, 175, 1, 1, 128, 128, 1, 1, 183, 1, 1, 128 },
+	{ 192, 193, 194, 195, 196, 197, 198, 199, 200, 201, 202, 203, 204, 205, 206, 207, 206, 205, 204, 203, 202, 201, 200, 199, 198 },
+	{ 172, 171, 170, 171, 172, 173, 174, 175, 174, 173, 172, 171, 170, 171, 172, 171, 170, 171, 172, 173, 174, 175, 174, 173, 172 },
+	{ 180, 179, 178, 179, 180, 181, 182, 183, 182, 181, 180, 179, 178, 179, 180, 179, 178, 179, 180, 181, 182, 183, 182, 181, 180 },
+	{ 121, 120, 216, 217, 218, 219, 176, 219, 218, 217, 216, 120, 121, 120, 216, 217, 218, 219, 176, 219, 218, 217, 216, 120, 121 },
+	{ 140, 140, 140, 140, 99, 99, 99, 49, 49, 99, 99, 99, 140, 140, 140, 140, 99, 99, 99, 49, 49, 99, 99, 99, 140 },
+	{ 110, 105, 105, 161, 161, 161, 162, 161, 161, 161, 105, 105, 110, 105, 105, 161, 161, 161, 162, 161, 161, 161, 105, 105, 110 },
+	{ 188, 187, 186, 187, 188, 189, 190, 191, 190, 189, 188, 187, 186, 187, 188, 187, 186, 187, 188, 189, 190, 191, 190, 189, 188 },
+	{ 208, 209, 210, 211, 212, 213, 214, 215, 208, 209, 210, 211, 212, 213, 214, 215, 208, 209, 210, 211, 212, 213, 214, 215, 208 },
+	{ 224, 225, 226, 227, 228, 229, 230, 231, 224, 225, 226, 227, 228, 229, 230, 231, 224, 225, 226, 227, 228, 229, 230, 231, 224 },
+	{ 232, 233, 234, 235, 236, 237, 238, 239, 232, 233, 234, 235, 236, 237, 238, 239, 232, 233, 234, 235, 236, 237, 238, 239, 232 }
+};
+
+// The original's rand() (Microsoft C)
+struct TrekRandom {
+	uint32 seed;
+	explicit TrekRandom(uint32 s) : seed(s) {}
+	int16 next() {
+		seed = seed * 214013 + 2531011;
+		return (seed >> 16) & 0x7fff;
+	}
+};
+
+// A planet's texture (2d4b:0e6e): a fractal height map, midpoint
+// displacement wrapping round, coloured with one of the ramps
+static byte *makePlanetTexture(int size, uint16 seed, uint16 color) {
+	TrekRandom rnd(seed);
+	color = MIN<uint16>(color, 21);
+	Common::Array<int16> h;
+	h.resize(size * size);
+	for (int i = 0; i < size * size; i++)
+		h[i] = 0;
+
+	struct Fractal {
+		Common::Array<int16> &h;
+		int size;
+		TrekRandom &rnd;
+		void line(int x1, int y1, int x2, int y2) {
+			int dx = (x2 - x1) >> 1, dy = (y2 - y1) >> 1;
+			int16 a = h[x1 * size + y1];
+			int16 b = h[((size - 1) & x2) * size + ((size - 1) & y2)];
+			int16 r = rnd.next();
+			h[(x1 + dx) * size + y1 + dy] = (int16)((int16)(a + b) / 2 + (int16)(r - 0x4000) % (dx + dy));
+			if (dx + dy > 1) {
+				line(x1, y1, x1 + dx, y1 + dy);
+				line(x1 + dx, y1 + dy, x2, y2);
+			}
+		}
+		void square(int x1, int y1, int x2, int y2) {
+			int hx = (x2 - x1) >> 1, hy = (y2 - y1) >> 1;
+			line(x1, y1 + hy, x2, y1 + hy);
+			if (hx + hy > 2) {
+				line(x1 + hx, y1, x1 + hx, y1 + hy);
+				line(x1 + hx, y1 + hy, x1 + hx, y2);
+			}
+			if (hx + hy > 3) {
+				square(x1, y1, x1 + hx, y1 + hy);
+				square(x1 + hx, y1, x2, y1 + hy);
+				square(x1, y1 + hy, x1 + hx, y2);
+				square(x1 + hx, y1 + hy, x2, y2);
+			}
+		}
+	} fractal = { h, size, rnd };
+	fractal.line(0, 0, size, 0);
+	fractal.line(0, 0, 0, size);
+	fractal.square(0, 0, size, size);
+
+	int16 hi = -0x8000, lo = 0x7fff;
+	for (int i = 0; i < size * size; i++) {
+		hi = MAX(hi, h[i]);
+		lo = MIN(lo, h[i]);
+	}
+	byte *texture = new byte[size * size];
+	for (int i = 0; i < size * size; i++)
+		texture[i] = kPlanetRamps[color][((int32)(h[i] - lo) * 25) / ((int32)(hi - lo) + 1)];
+	return texture;
+}
+
+void StarTrekEngine::initPlanetR3(R3 *r3, int16 size, int16 small, uint16 seed, uint16 color) {
+	freePlanetR3(r3);
+	r3->field1e = 1;
+	r3->planet = true;
+	r3->planetSize = size;
+	r3->planetSmall = small;
+	r3->planetSeed = seed;
+	r3->planetColor = color;
+	r3->field22 = size * 11;
+}
+
+void StarTrekEngine::freePlanetR3(R3 *r3) {
+	delete[] r3->planetTexture;
+	r3->planetTexture = nullptr;
+	delete r3->bitmap;
+	r3->bitmap = nullptr;
+}
+
+// The planet as it's seen now (2d4b:0008): the texture, turned to face the
+// camera the way the planet does, mapped onto a disc whose size steps with
+// the distance
+bool StarTrekEngine::selectPlanetView(R3 *r3) {
+	if (!_planetTables) {
+		Common::MemoryReadStreamEndian *file = _resource->loadFile("PLANET.DAT", 0, false);
+		if (!file)
+			return false;
+		_planetTables = new byte[0x10000]; // (read with 16-bit offsets)
+		memset(_planetTables, 0, 0x10000);
+		file->read(_planetTables, MIN<int64>(file->size(), 0x761a));
+		delete file;
+	}
+	const int textureSize = r3->planetSmall ? 0x20 : 0x80;
+	if (!r3->planetTexture)
+		r3->planetTexture = makePlanetTexture(textureSize, r3->planetSeed, r3->planetColor);
+
+	// the disc: the closer, the bigger the image (and the smaller the scale)
+	int32 far = (int32)_starfieldPointDivisor * r3->planetSize;
+	int32 z = r3->field36.z;
+	uint16 table;
+	int n;
+	if (z >= far) {
+		table = 0x4000;
+		r3->field24 = r3->planetSize;
+		n = 11;
+	} else if (z >= far / 2) {
+		table = 0x40f2;
+		r3->field24 = r3->planetSize / 2;
+		n = 21;
+	} else if (r3->planetSmall || z >= far / 3) {
+		table = 0x4464;
+		r3->field24 = r3->planetSize / 3;
+		n = 31;
+	} else if (z >= far / 4) {
+		table = 0x4be6;
+		r3->field24 = r3->planetSize / 4;
+		n = 41;
+	} else {
+		table = 0x5908;
+		r3->field24 = r3->planetSize / 6;
+		n = 61;
+	}
+
+	// which side of it the camera sees
+	Point3 toCamera = Point3(0, 0, 0) - r3->field36;
+	Point3 p = matrixMult(toCamera, r3->matrix2.invert());
+	int16 heading = trekAtan2(p.x, p.z) - 0x200;
+	int16 pitch = trekAsin(fx14Div(p.y, r3->field54));
+	if (pitch < -0x80 || pitch > 0x80) {
+		int32 h = (int32)sqrt((double)(int16)p.x * (int16)p.x + (double)(int16)p.z * (int16)p.z);
+		pitch = trekAcos(fx14Div(h, r3->field54));
+		if (p.y < 0)
+			pitch = -pitch;
+	}
+	Matrix view = initMatrix();
+	trekPostRotateY(view, -heading);
+	trekPostRotateX(view, pitch);
+	for (int i = 0; i < 3; i++)
+		for (int j = 0; j < 3; j++)
+			r3->viewMatrix[i][j] = view[i][j].raw();
+	r3->viewMirrored = false;
+
+	uint16 lat = ((((int32)pitch << 7) + 0x200) / 0x400 & 0x7f) << 7;
+	uint16 lon = ((((int32)-heading << 7) + 0x200) / 0x400 & 0x7f) << 7;
+
+	delete r3->bitmap;
+	r3->bitmap = new Bitmap(n, n);
+	r3->bitmap->xoffset = (n - 1) / 2;
+	r3->bitmap->yoffset = (n - 1) / 2;
+	byte *out = r3->bitmap->pixels;
+	const byte *tables = _planetTables;
+	auto word = [tables](uint32 offset) {
+		return (uint16)(tables[offset & 0xffff] | (tables[(offset + 1) & 0xffff] << 8));
+	};
+	uint32 si = table;
+	int count = n * n;
+	while (count > 0) {
+		uint16 bx = word(si) + lat;
+		si += 2;
+		if (bx & 0x8000) {
+			// a run outside the disc
+			while (true) {
+				*out++ = 0;
+				count--;
+				if (count == 0 || !(word(si) & 0x8000))
+					break;
+				si += 2;
+			}
+			continue;
+		}
+		bx = (word(bx & 0xbfff) + lon) & 0xbfff;
+		if (r3->planetSmall) {
+			uint16 v = bx << 1;
+			v = (((v >> 8) >> 2) << 8) | (v & 0xff);
+			bx = v >> 3;
+		}
+		*out++ = bx < textureSize * textureSize ? r3->planetTexture[bx] : 0;
+		count--;
+	}
+	return true;
 }
 
 static const char *const kShipNames[] = { "ENT", "KLING", "ORION", "ROM" };
@@ -361,7 +674,12 @@ bool StarTrekEngine::selectShipView(R3 *r3) {
 }
 
 void StarTrekEngine::drawR3Shape(R3 *r3) {
+	// (nothing at the camera or behind it: the camera may be the Enterprise's)
+	if (r3->field36.z <= 0)
+		return;
 	if (r3->shipViews && !selectShipView(r3))
+		return;
+	if (r3->planet && !selectPlanetView(r3))
 		return;
 
 	if (r3->bitmap != nullptr && r3->field36.z > 0) {

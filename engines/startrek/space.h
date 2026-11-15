@@ -170,6 +170,16 @@ struct R3 {
 	// (selectShipView(), the original's funcPtr1 for them), its orientation
 	// as rendered, and whether it's drawn mirrored.
 	bool shipViews = false;
+	// For planets (field1e 1, the original's funcPtr1 2d4b:0e10): the
+	// planet's size, whether it's a small one (32x32 texture), and the seed
+	// and colour ramp its texture is made from (a fractal); the texture
+	// itself once made
+	bool planet = false;
+	int16 planetSize = 0; // 0xa0
+	int16 planetSmall = 0; // 0xa2
+	uint16 planetSeed = 0; // 0xb0
+	uint16 planetColor = 0; // 0xb2
+	byte *planetTexture = nullptr;
 	int16 viewMatrix[3][3] = {}; // 0x6c
 	bool viewMirrored = false; // 0x7e
 	int16 view = -1; // 0x66
@@ -184,6 +194,29 @@ struct R3 {
 
 // Maximum number of R3 objects in space at once
 #define NUM_SPACE_OBJECTS 0x30
+
+// The original's 3D arithmetic, exactly (space.cpp): angles in 1/1024ths
+// of a turn, matrices and sines 2.14 fixed point
+int16 trekSin(int angle);
+int16 trekCos(int angle);
+int16 trekAtan2(int32 y, int32 x);
+int16 trekAsin(int16 v);
+int16 trekAcos(int16 v);
+/// a * b, rows times columns, the sum shifted once (2407:0b04's partner 3a22:0181)
+Matrix trekMatrixMultiply(const Matrix &a, const Matrix &b);
+/// m turned round its y axis: Ry * m (2407:09f4)
+void trekPreRotateY(Matrix &m, int16 angle);
+/// m turned round its x axis: Rx * m (2407:096c)
+void trekPreRotateX(Matrix &m, int16 angle);
+/// m * Ry (2407:085c)
+void trekPostRotateY(Matrix &m, int16 angle);
+/// m * Rx (2407:07d4)
+void trekPostRotateX(Matrix &m, int16 angle);
+/// A matrix looking along dir with up as near up as it can be (2407:0d67).
+/// False when dir is 0 or along up.
+bool trekLookAt(const Point3 &dir, const Point_Fixed14 &up, Matrix &out);
+/// The length of a vector (2407:0c05)
+int32 trekLength(const Point3 &p);
 
 } // End of namespace StarTrek
 

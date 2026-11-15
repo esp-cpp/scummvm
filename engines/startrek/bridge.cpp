@@ -59,8 +59,7 @@ void StarTrekEngine::initBridge(bool b) {
 }
 
 void StarTrekEngine::loadBridge() {
-	// TODO: Check why the +1 is needed here
-	initStarfield(72 + 1, 30, 247 + 1, 102, 0);
+	initStarfield(0x48, 0x1e, 0xf7, 0x66, 0x200 / 6);
 
 	_gfx->setBackgroundImage("bridge");
 	_gfx->loadPri("bridge");
@@ -68,6 +67,8 @@ void StarTrekEngine::loadBridge() {
 	_system->updateScreen();
 
 	loadBridgeActors();
+	initStarfieldSprite(&_starfieldSprite, new StubBitmap(0, 0), _starfieldRect);
+	renderSpace();
 
 	//sub_1312C();	// TODO
 
@@ -1011,6 +1012,8 @@ void StarTrekEngine::handleBridgeEvents() {
 		switch (event.type) {
 		case TREKEVENT_TICK:
 			updateActorAnimations();
+			if (!_spaceFullScreen)
+				updateBridgeViewscreen();
 
 			//updateMouseBitmap();
 			renderBanBelowSprites();
@@ -1229,6 +1232,7 @@ void StarTrekEngine::handleBridgeMenu(int menuEvent) {
 void StarTrekEngine::showStarMap() {
 	// HACK: Move to the target planet and play its associated sequence, until the starmap code is implemented
 	_currentPlanet = _targetPlanet;
+	setStarSystemPlanet(_currentPlanet);
 
 	switch (_targetPlanet) {
 	case kPlanetPollux:
@@ -1257,9 +1261,6 @@ void StarTrekEngine::showStarMap() {
 	// TODO
 }
 
-void StarTrekEngine::showMissionStartEnterpriseFlyby(Common::String sequence, Common::String name) {
-	// TODO
-}
 
 void StarTrekEngine::startBattle(Common::String enemyShip) {
 	// TODO
@@ -1291,18 +1292,6 @@ void StarTrekEngine::wrongDestinationRandomEncounter() {
 // Used when approaching Beta Myamid / Masada in chapter 2, and Ark 7 in chapter 3
 void StarTrekEngine::orbitPlanetSequence(int sequenceId) {
 	// TODO
-}
-
-void StarTrekEngine::orbitPlanet() {
-	const char *enteringOrbitText = "#BRID\\B_333#Entering standard orbit.";
-	const char *leavingOrbitText = "#BRID\\B_335#Leaving orbit.";
-
-	// TODO: Show starfield
-	// TODO: Warp to planet, if needed
-	// TODO: Update sprites
-
-	_enterpriseState.inOrbit = !_enterpriseState.inOrbit;
-	showTextboxBridge(kBridgeTalkerSulu, _enterpriseState.inOrbit ? enteringOrbitText : leavingOrbitText);
 }
 
 void StarTrekEngine::captainsLog() {

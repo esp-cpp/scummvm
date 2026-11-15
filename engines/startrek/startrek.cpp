@@ -134,6 +134,9 @@ StarTrekEngine::~StarTrekEngine() {
 		delete _activeMenu->nextMenu;
 	delete _activeMenu;
 
+	delete _starsFile;
+	delete[] _planetTables;
+	freePlanetR3(&_planetR3);
 	delete _gfx;
 	delete _sound;
 	delete _resource;
@@ -170,6 +173,7 @@ Common::Error StarTrekEngine::run() {
 	if (!loadedSave) {
 		if (isCd || !isDemo) {
 			playIntro();
+			initSpaceObjects();
 			_missionToLoad = "DEMON";
 			_bridgeSequenceToLoad = 0;
 			runGameMode(GAMEMODE_BRIDGE, false);
@@ -179,6 +183,7 @@ Common::Error StarTrekEngine::run() {
 			runGameMode(GAMEMODE_AWAYMISSION, false);
 		}
 	} else {
+		initSpaceObjects();
 		_roomIndexToLoad = -1;
 		_bridgeSequenceToLoad = -1;
 		runGameMode(_gameMode, true);

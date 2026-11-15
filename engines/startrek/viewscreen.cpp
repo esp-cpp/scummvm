@@ -1,0 +1,322 @@
+/* ScummVM - Graphic Adventure Engine
+ *
+ * ScummVM is the legal property of its developers, whose names
+ * are too numerous to list here. Please refer to the COPYRIGHT
+ * file distributed with this source distribution.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ */
+
+// Space as the bridge's viewscreen and the full screen show it, and the 3D
+// sequences: the mission start fly-bys, entering and leaving orbit. As the
+// original (DOS CD) does them; its functions are named by address.
+
+#include "startrek/bridge.h"
+#include "startrek/resource.h"
+#include "startrek/sound.h"
+#include "startrek/startrek.h"
+
+namespace StarTrek {
+
+// The star systems' planets (3383:0008): their textures' seeds and colours
+static const struct {
+	uint16 seed;
+	uint16 color;
+} kStarSystemPlanets[] = {
+	{ 453, 6 },   // Centurius
+	{ 293, 10 },  // Camerons Star
+	{ 517, 11 },  // Ark 7
+	{ 318, 12 },  // Harlequin
+	{ 924, 18 },  // Harrapa
+	{ 341, 7 },   // Elasi Prime
+	{ 856, 8 },   // Digifal
+	{ 135, 0 },   // Strahkeer
+	{ 392, 14 },  // Hrakkour
+	{ 643, 13 },  // Tri-Rho Nautica
+	{ 832, 12 },  // Shiva Omicron
+	{ 341, 11 },  // Alpha Proxima
+	{ 839, 10 },  // Omega Maelstrom
+	{ 932, 7 },   // Argos IV
+	{ 645, 14 },  // Beta Myamid
+	{ 234, 15 },  // Sirius
+	{ 341, 16 },  // Sigma Zhukova
+	{ 883, 17 },  // Castor
+	{ 752, 9 },   // Pollux
+	{ 234, 9 },   // Christgen
+};
+
+// The game's start (2d4b:0c65, then added to the shapes): a planet ahead
+void StarTrekEngine::initSpaceObjects() {
+	freePlanetR3(&_planetR3);
+	_planetR3 = R3();
+	_planetR3.matrix = initMatrix();
+	_planetR3.pos = Point3(0, 0, 15300);
+	initPlanetR3(&_planetR3, 500, 0, 714, 10);
+	addR3(&_planetR3);
+	_cameraOnEnterprise = true;
+}
+
+void StarTrekEngine::setStarSystemPlanet(int planet) {
+	if (planet < 0 || planet >= ARRAYSIZE(kStarSystemPlanets)) {
+		setRandomPlanet();
+		return;
+	}
+	initPlanetR3(&_planetR3, 500, 0, kStarSystemPlanets[planet].seed, kStarSystemPlanets[planet].color);
+}
+
+// (2d4b:0d14)
+void StarTrekEngine::setRandomPlanet() {
+	uint32 seed = _frameIndex;
+	auto rnd = [&seed]() {
+		seed = seed * 214013 + 2531011;
+		return (int16)((seed >> 16) & 0x7fff);
+	};
+	int16 texture = rnd() % 1000;
+	int16 color = rnd() % 16 + 6;
+	initPlanetR3(&_planetR3, 500, 0, texture, color);
+}
+
+// The 3D view across the whole screen (11dc:26ed, 11dc:086d)
+void StarTrekEngine::showFullScreenSpace() {
+	if (_spaceFullScreen)
+		return;
+	removeDrawnActorsFromScreen();
+	_gfx->delSprite(&_starfieldSprite);
+	_gfx->toggleMouse(false);
+	_gfx->clearScreenAndPriBuffer();
+	initStarfield(2, 2, 0x13f, 199, 0x200 / 4);
+	initStarfieldSprite(&_starfieldSprite, new StubBitmap(0, 0), _starfieldRect);
+	_spaceFullScreen = true;
+}
+
+// Back to the bridge, its viewscreen showing space (11dc:2717, 11dc:08e6)
+void StarTrekEngine::showBridgeViewscreen() {
+	if (!_spaceFullScreen)
+		return;
+	_gfx->delSprite(&_starfieldSprite);
+	_gfx->clearScreenAndPriBuffer();
+	loadBridge();
+	_gfx->toggleMouse(true);
+	_spaceFullScreen = false;
+}
+
+void StarTrekEngine::renderSpace() {
+	if (_cameraOnEnterprise) {
+		// (11dc:1f75) the viewscreen is the Enterprise's
+		_starfieldPosition = _enterpriseR3.pos;
+		_someMatrix = _enterpriseR3.matrix;
+	}
+	updateStarfieldAndShips(false);
+	_gfx->drawAllSprites();
+}
+
+void StarTrekEngine::updateBridgeViewscreen() {
+	if (_enterpriseCruise) {
+		for (int i = 0; i < 3; i++)
+			_enterpriseR3.pos[i] += ((int32)_enterpriseR3.matrix[2][i].raw() * _enterpriseCruise) >> 14;
+	}
+	// (the planet turns, 11dc:1c82)
+	trekPreRotateY(_planetR3.matrix, 4);
+	renderSpace();
+}
+
+void StarTrekEngine::waitSpaceTick() {
+	_gfx->drawAllSprites();
+	waitForNextTick(false);
+	_frameIndex++;
+}
+
+// Entering standard orbit (346c:048f): the Enterprise slows past the
+// camera, which turns to follow it; then the view from orbit
+void StarTrekEngine::enterOrbitSequence() {
+	_enterpriseR3.pos = _planetR3.pos + Point3(0x226, 0, -0x802);
+	_enterpriseR3.matrix = initMatrix();
+	Point3 camera = _planetR3.pos + Point3(900, 0, 0);
+	Matrix cameraMatrix = initMatrix();
+	_cameraOnEnterprise = false;
+	_starfieldPosition = camera;
+	_gfx->clearScreenAndPriBuffer();
+
+	int32 speed = 100;
+	for (int frame = 0; frame != 0x25; frame++) {
+		_enterpriseR3.pos.z += speed;
+		speed -= 2;
+
+		// (2f0d:245f) where the Enterprise is, from the camera
+		Point3 d = matrixMult(_enterpriseR3.pos - camera, cameraMatrix.invert());
+		int16 heading = trekAtan2(d.x, d.z);
+		trekPreRotateY(cameraMatrix, heading);
+		_someMatrix = cameraMatrix;
+
+		if (frame < 0x20)
+			_gfx->incPaletteFadeLevel();
+		else
+			_gfx->decPaletteFadeLevel();
+		renderSpace();
+		waitSpaceTick();
+	}
+	_gfx->fadeoutScreen();
+	_gfx->clearScreenAndPriBuffer();
+
+	// in orbit, just above the planet, looking down at it
+	camera = _planetR3.pos;
+	camera.z -= _planetR3.field22 + 0xfa;
+	cameraMatrix = initMatrix();
+	trekPreRotateY(cameraMatrix, 0x40);
+	trekPreRotateX(cameraMatrix, -0x20);
+	_enterpriseR3.pos = camera;
+	_enterpriseR3.matrix = cameraMatrix;
+	_enterpriseCruise = 0;
+	_cameraOnEnterprise = true;
+}
+
+// Leaving orbit (346c:06c6): the Enterprise turns away from the planet and
+// speeds off, the camera watching it go
+void StarTrekEngine::leaveOrbitSequence() {
+	_enterpriseR3.pos = _planetR3.pos + Point3(-300, 0, -0x226);
+	_enterpriseR3.matrix = initMatrix();
+	trekPreRotateY(_enterpriseR3.matrix, 0x100);
+	_someMatrix = initMatrix();
+	_starfieldPosition = _enterpriseR3.pos;
+	_starfieldPosition.z -= 0x1fe;
+	_cameraOnEnterprise = false;
+	_gfx->clearScreenAndPriBuffer();
+
+	int32 speed = 0x19;
+	for (int frame = 0; frame != 0x40; frame++) {
+		if (frame < 0x20)
+			trekPreRotateY(_enterpriseR3.matrix, 8);
+		for (int i = 0; i < 3; i++)
+			_enterpriseR3.pos[i] += ((int32)_enterpriseR3.matrix[2][i].raw() * speed) >> 14;
+
+		Matrix look;
+		if (trekLookAt(_enterpriseR3.pos - _starfieldPosition, _enterpriseR3.matrix[1], look))
+			_someMatrix = look;
+
+		if (frame < 0x3c)
+			_gfx->incPaletteFadeLevel();
+		else
+			_gfx->decPaletteFadeLevel();
+		renderSpace();
+		waitSpaceTick();
+		speed += 4;
+	}
+	_gfx->fadeoutScreen();
+	_gfx->clearScreenAndPriBuffer();
+
+	_enterpriseCruise = 0x19;
+	_cameraOnEnterprise = true;
+}
+
+// Sulu, orbit (11dc:2741)
+void StarTrekEngine::orbitPlanet() {
+	const char *enteringOrbitText = "#BRID\\B_333#Entering standard orbit.";
+	const char *leavingOrbitText = "#BRID\\B_335#Leaving orbit.";
+	bool entering = !_enterpriseState.inOrbit;
+
+	_gfx->fadeoutScreen();
+	showFullScreenSpace();
+	if (entering)
+		enterOrbitSequence();
+	else
+		leaveOrbitSequence();
+	showBridgeViewscreen();
+	renderSpace();
+
+	_enterpriseState.inOrbit = entering;
+	showTextboxBridge(kBridgeTalkerSulu, entering ? enteringOrbitText : leavingOrbitText);
+}
+
+// The Enterprise flying past at a mission's start, its title, Kirk's
+// narration (11dc:39a7, then the ticks of 11dc:3b21)
+void StarTrekEngine::showMissionStartEnterpriseFlyby(Common::String sequence, Common::String name) {
+	setRandomPlanet();
+	_sound->playMidiMusicTracks(MIDITRACK_11);
+	_sound->playVoc("bridloop");
+	showFullScreenSpace();
+
+	// (the camera and the Enterprise move in straight lines, the camera
+	// keeping it in view: 11dc:27c8)
+	int16 velocity[2][3] = { { 100, 0, 0 }, { 0x7d, 0, 0 } };
+	int16 start[2][3] = { { 0x7b6, 0, 0x2d0 }, { 0, 0, 0 } };
+	_someMatrix = initMatrix();
+	_enterpriseR3.matrix = initMatrix();
+	trekPreRotateY(_enterpriseR3.matrix, 0x100);
+	_enterpriseCruise = 0;
+	bool lookAtEnterprise = true;
+	_cameraOnEnterprise = false;
+
+	Sprite title;
+	Bitmap *titleBitmap = new Bitmap(_resource->loadBitmapFile(name));
+	titleBitmap->xoffset = titleBitmap->width / 2;
+	titleBitmap->yoffset = titleBitmap->height / 2;
+	bool titleShown = false;
+
+	for (int t = 2; t <= 0x96; t++) {
+		for (int i = 0; i < 3; i++)
+			_enterpriseR3.pos[i] = (int16)(velocity[1][i] * t + start[1][i]);
+		if (lookAtEnterprise) {
+			for (int i = 0; i < 3; i++)
+				_starfieldPosition[i] = (int16)(velocity[0][i] * t + start[0][i]);
+			Matrix look;
+			if (trekLookAt(_enterpriseR3.pos - _starfieldPosition, _enterpriseR3.matrix[1], look))
+				_someMatrix = look;
+		}
+
+		switch (t) {
+		case 0x41:
+			if (!sequence.empty() && _sfxEnabled && _sfxWorking)
+				_sound->playSpeech(sequence);
+			_gfx->addSprite(&title);
+			title.setXYAndPriority(0xa0, 0x3c, 0xe);
+			title.setBitmap(titleBitmap);
+			titleShown = true;
+			break;
+		case 0x60:
+			if (titleShown) {
+				title.dontDrawNextFrame();
+				_gfx->drawAllSprites();
+				_gfx->delSprite(&title);
+				titleShown = false;
+			}
+			break;
+		case 0x69:
+			// to the bridge, its viewscreen the Enterprise's, cruising
+			showBridgeViewscreen();
+			lookAtEnterprise = false;
+			_cameraOnEnterprise = true;
+			start[1][0] = velocity[1][0] * t;
+			velocity[1][0] = 10;
+			break;
+		default:
+			break;
+		}
+
+		if (_spaceFullScreen)
+			renderSpace();
+		else
+			updateBridgeViewscreen();
+		// (fading in, a tick at a time: 11dc:1c82)
+		if (t > 2)
+			_gfx->incPaletteFadeLevel();
+		waitSpaceTick();
+	}
+	if (titleShown)
+		_gfx->delSprite(&title);
+	_enterpriseCruise = 10;
+	_cameraOnEnterprise = true;
+}
+
+} // End of namespace StarTrek

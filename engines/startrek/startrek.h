@@ -357,7 +357,7 @@ private:
 
 	// space.cpp (pseudo-3d)
 	void initStarfieldPosition();
-	void initStarfield(int16 x, int16 y, int16 width, int16 height, int16 arg8);
+	void initStarfield(int16 x1, int16 y1, int16 x2, int16 y2, int16 fov);
 	void addR3(R3 *r3);
 	void delR3(R3 *r3);
 	void clearStarfieldPixels();
@@ -372,6 +372,12 @@ private:
 	 */
 	bool selectShipView(R3 *r3);
 	void releaseShipView(R3 *r3);
+	/// A planet (the original's 2d4b:0d7c): drawn from a fractal texture
+	/// mapped onto a sphere (PLANET.DAT) as seen from the camera
+	void initPlanetR3(R3 *r3, int16 size, int16 small, uint16 seed, uint16 color);
+	bool selectPlanetView(R3 *r3);
+	void freePlanetR3(R3 *r3);
+	byte *_planetTables = nullptr; // PLANET.DAT
 	/// The Enterprise as the original sets it up (ENTERPRI.DSC)
 	void initEnterpriseR3();
 
@@ -612,6 +618,23 @@ public:
 	void handleBridgeMenu(int menuEvent);
 	void showStarMap();
 	void orbitPlanet();
+
+	// viewscreen.cpp: space as the bridge's viewscreen and the full screen
+	// show it, and the 3D sequences
+	void initSpaceObjects();
+	/// The planet of a star system (kPlanet...), as the original makes it
+	void setStarSystemPlanet(int planet);
+	/// A random one (the mission start fly-bys' backdrop)
+	void setRandomPlanet();
+	void showFullScreenSpace();
+	void showBridgeViewscreen();
+	/// Space drawn as the camera sees it now
+	void renderSpace();
+	/// Each tick on the bridge: the Enterprise moving, the viewscreen
+	void updateBridgeViewscreen();
+	void enterOrbitSequence();
+	void leaveOrbitSequence();
+	void waitSpaceTick();
 	void captainsLog();
 
 	/**
@@ -796,6 +819,19 @@ public:
 	int16 _starfieldXVar2, _starfieldYVar2;
 	Common::Rect _starfieldRect;
 	R3 _enterpriseR3;
+	// The planet of the star system the Enterprise is in (the original's
+	// DS:bf7e), drawn in space like the ships
+	R3 _planetR3;
+	// What the 3D view takes: the bridge's viewscreen (false) or the whole
+	// screen (true, the original's DS:0054)
+	bool _spaceFullScreen = false;
+	// The camera is the Enterprise's (the bridge's viewscreen) unless a
+	// sequence moves it itself
+	bool _cameraOnEnterprise = true;
+	// The Enterprise cruising (16.16, along its heading) between the 3D
+	// sequences, until there's a flight model
+	int32 _enterpriseCruise = 0;
+	Common::MemoryReadStreamEndian *_starsFile = nullptr;
 	R3 *_r3List[NUM_SPACE_OBJECTS];
 	R3 *_orderedR3List[NUM_SPACE_OBJECTS];
 	Matrix _starPositionMatrix;
