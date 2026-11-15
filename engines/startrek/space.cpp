@@ -63,6 +63,7 @@ void StarTrekEngine::addR3(R3 *r3) {
 void StarTrekEngine::delR3(R3 *r3) {
 	delete r3->bitmap;
 	r3->bitmap = nullptr;
+	r3->view = -1;
 
 	for (int i = 0; i < NUM_SPACE_OBJECTS; i++) {
 		if (_r3List[i] == r3) {
@@ -142,16 +143,8 @@ void StarTrekEngine::drawStarfield() {
  * FIXME: Original returned an int, not a bool. This may affect the stability of the sort...
  */
 bool compareR3Objects(R3 *obj1, R3 *obj2) {
-	int32 diff = obj1->field54 - obj2->field54;
-	if (diff < 0)
-		return true;
-// FIXME: Original had distinct value for diff == 0, rather than bool
-#if 0
-	else if (diff == 0)
-		return false;
-#endif
-	else
-		return false;
+	// the farthest first: the nearer ones are drawn over them
+	return obj1->field54 > obj2->field54;
 }
 
 void StarTrekEngine::updateStarfieldAndShips(bool arg0) {
@@ -169,11 +162,12 @@ void StarTrekEngine::updateStarfieldAndShips(bool arg0) {
 			continue;
 		r3->field34 = 0;
 
-		switch (r3->field1e) { // TODO
+		switch (r3->field1e) {
 		case 1:
 			r3 = sub_19f24(r3);
 			break;
-		case 2: // TODO (specifically for the enterprise?)
+		case 2: // a ship (TODO: exploding, R3 field 0x1c8)
+			r3 = sub_19f24(r3);
 			break;
 		case 3:
 			r3 = sub_19f24(r3);
@@ -193,10 +187,10 @@ void StarTrekEngine::updateStarfieldAndShips(bool arg0) {
 			R3 *r3 = _orderedR3List[i];
 			r3->field34 = 1;
 
-			switch (r3->field1e) { // TODO
+			switch (r3->field1e) {
 			case 1:
-				break;
 			case 2:
+				drawR3Shape(r3);
 				break;
 			case 3:
 				if (r3->field20 == 1) {
@@ -238,15 +232,139 @@ R3 *StarTrekEngine::sub_19f24(R3 *r3) {
 		return nullptr;
 }
 
+// The original's trigonometry: angles in 1/1024ths of a turn, values 2.14
+// fixed point.
+static int16 trekSin(int angle) {
+	return (int16)round(sin((angle & 0x3ff) * (2 * M_PI / 1024)) * 16384);
+}
+
+static int16 trekCos(int angle) {
+	return trekSin(angle + 0x100);
+}
+
+// atan2(y, x) in (-0x200, 0x200]
+static int16 trekAtan2(int32 y, int32 x) {
+	if (x == 0 && y == 0)
+		return 0;
+	return (int16)round(atan2((double)y, (double)x) * (512 / M_PI));
+}
+
+static int16 trekAcos(int16 v) {
+	return (int16)round(acos(CLIP<int>(v, -16384, 16384) / 16384.0) * (512 / M_PI));
+}
+
+static int16 trekAsin(int16 v) {
+	return (int16)round(asin(CLIP<int>(v, -16384, 16384) / 16384.0) * (512 / M_PI));
+}
+
+// (a * b + c * d) >> 14, as 16 bits
+static int16 fx14MulAdd(int32 a, int16 b, int32 c, int16 d) {
+	return (int16)((a * b + c * d) >> 14);
+}
+
+static int16 fx14Mul(int16 a, int16 b) {
+	return (int16)(((int32)a * b) >> 14);
+}
+
+// a / b, 2.14 fixed point
+static int16 fx14Div(int32 a, int32 b) {
+	if (b == 0)
+		return 0;
+	return (int16)CLIP<int32>((int32)(int16)a * 16384 / (int16)b, -32768, 32767);
+}
+
+static const char *const kShipNames[] = { "ENT", "KLING", "ORION", "ROM" };
+
+void StarTrekEngine::initEnterpriseR3() {
+	_enterpriseR3 = R3();
+	_enterpriseR3.matrix = initMatrix();
+	_enterpriseR3.field1e = 2;
+	_enterpriseR3.shipViews = true;
+	// its class (the views to draw it with), radius and size
+	Common::MemoryReadStreamEndian *file = _resource->loadFile("ENTERPRI.DSC", 0, false);
+	if (file) {
+		_enterpriseR3.field20 = file->readSint16();
+		_enterpriseR3.field22 = file->readSint16();
+		_enterpriseR3.field24 = file->readSint16();
+		delete file;
+	}
+	addR3(&_enterpriseR3);
+}
+
+void StarTrekEngine::releaseShipView(R3 *r3) {
+	delete r3->bitmap;
+	r3->bitmap = nullptr;
+	r3->view = -1;
+}
+
+bool StarTrekEngine::selectShipView(R3 *r3) {
+	if (r3->field20 < 0 || r3->field20 >= ARRAYSIZE(kShipNames))
+		return false;
+
+	// Where the camera is, seen from the ship
+	Point3 toCamera = Point3(0, 0, 0) - r3->field36;
+	Point3 p = matrixMult(toCamera, r3->matrix2.invert());
+
+	int32 heading = trekAtan2(p.x, p.z);
+	if (heading < 0)
+		heading += 0x400;
+
+	// from above (0) to below (0x200)
+	int32 pitch = trekAcos(fx14Div(p.y, r3->field54));
+	if (pitch < 0x80 || pitch > 0x180) {
+		int32 h = (int32)sqrt((double)(int16)p.x * (int16)p.x + (double)(int16)p.z * (int16)p.z);
+		pitch = trekAsin(fx14Div(h, r3->field54));
+		if (p.y < 0)
+			pitch = 0x200 - pitch;
+	}
+	int pitchIndex = MIN<int32>(6, (pitch * 6 + 0x100) / 0x200);
+
+	heading += 0x2a;
+	if (heading >= 0x400)
+		heading -= 0x400;
+	int headingIndex = heading * 12 / 0x400;
+
+	// The views: 7 headings (from behind round to the front) at 5 pitches,
+	// plus straight above and below; the other 5 headings are mirrored
+	int16 view;
+	if (pitchIndex == 0)
+		view = 0x00;
+	else if (pitchIndex == 6)
+		view = 0x0c;
+	else if (headingIndex <= 6)
+		view = (headingIndex << 5) | (pitchIndex << 1);
+	else
+		view = 0x8000 | ((12 - headingIndex) << 5) | (pitchIndex << 1);
+
+	if (view == r3->view && r3->bitmap)
+		return true;
+	releaseShipView(r3);
+
+	Common::String name = Common::String::format("%s%02x.R3S", kShipNames[r3->field20], (view >> 1) & 0x77);
+	Common::MemoryReadStreamEndian *file = _resource->loadFile(name, 0, false);
+	if (!file)
+		return false;
+	for (int i = 0; i < 3; i++)
+		for (int j = 0; j < 3; j++)
+			r3->viewMatrix[i][j] = file->readSint16();
+	r3->viewMirrored = (view & 0x8000) != 0;
+	if (r3->viewMirrored) {
+		r3->viewMatrix[0][1] = -r3->viewMatrix[0][1];
+		r3->viewMatrix[0][2] = -r3->viewMatrix[0][2];
+		r3->viewMatrix[1][0] = -r3->viewMatrix[1][0];
+		r3->viewMatrix[2][0] = -r3->viewMatrix[2][0];
+	}
+	file->seek(0x24, SEEK_SET);
+	r3->bitmap = new Bitmap(file, true);
+	r3->view = view;
+	return true;
+}
+
 void StarTrekEngine::drawR3Shape(R3 *r3) {
-	if (r3->field1e != 3) // TODO: remove this
+	if (r3->shipViews && !selectShipView(r3))
 		return;
 
-	if (r3->funcPtr1 != 0) {
-		// TODO: call it
-	}
-
-	if (r3->bitmap != nullptr) {
+	if (r3->bitmap != nullptr && r3->field36.z > 0) {
 		double dbl68 = ((double)r3->field24 * _starfieldPointDivisor) / r3->field36.z;
 		double dbl70 = 1.0 / dbl68;
 
@@ -259,9 +377,46 @@ void StarTrekEngine::drawR3Shape(R3 *r3) {
 		double dbl50 = 0.0;
 		double dbl48 = 0.0;
 
+		// The orientation of the shape as it's stored, and as it's seen now
+		const int16 (*v)[3] = r3->viewMatrix;
+		int16 m[3][3];
+		for (int i = 0; i < 3; i++)
+			for (int j = 0; j < 3; j++)
+				m[i][j] = r3->matrix2[i][j].raw();
+
 		switch (r3->field1e) {
-		case 1: // TODO
+		case 1:
+		case 4: {
+			// rotated in the screen's plane only
+			int32 r00 = 0, r01 = 0;
+			for (int k = 0; k < 3; k++) {
+				r00 += (int32)v[k][0] * m[k][0];
+				r01 += (int32)v[k][0] * m[k][1];
+			}
+			r00 = (int16)(r00 >> 14);
+			r01 = (int16)(r01 >> 14);
+			int16 angle = trekAtan2(r01, r00);
+			double c = trekCos(angle) / 16384.0;
+			double sn = trekSin(angle) / 16384.0;
+			dbl30 = c;
+			dbl28 = -sn;
+			dbl20 = sn;
+			dbl18 = c;
+			dbl60 = dbl18;
+			dbl58 = -dbl28;
+			dbl50 = -dbl20;
+			dbl48 = dbl30;
+			dbl68 = CLIP(dbl68, 0.01, 10.0);
+			dbl30 *= dbl68;
+			dbl28 *= dbl68;
+			dbl20 *= dbl68;
+			dbl18 *= dbl68;
+			dbl60 /= dbl68;
+			dbl58 /= dbl68;
+			dbl50 /= dbl68;
+			dbl48 /= dbl68;
 			break;
+		}
 		case 3:
 			dbl30 = dbl68;
 			dbl28 = 0.0;
@@ -272,10 +427,65 @@ void StarTrekEngine::drawR3Shape(R3 *r3) {
 			dbl50 = 0.0;
 			dbl48 = dbl70;
 			break;
-		case 4: // TODO
+		default: {
+			// A ship: the bitmap's two axes are the two of the view's that
+			// face the camera most; where those land on the screen now
+			// (with the perspective at the ship's position) maps the bitmap.
+			int a = ABS(fx14MulAdd(v[0][0], v[1][1], -v[1][0], v[0][1])) / 4;
+			int b = ABS(fx14MulAdd(v[1][0], v[2][1], -v[2][0], v[1][1])) / 2;
+			int c = ABS(fx14MulAdd(v[0][0], v[2][1], -v[2][0], v[0][1])) / 1;
+			int iA = 2, iB = 0;
+			if (a > b) {
+				if (a > c)
+					iA = 1;
+			} else if (b > c) {
+				iB = 1;
+			}
+
+			int16 e0 = fx14MulAdd(v[iA][1], m[iB][0], -v[iB][1], m[iA][0]);
+			int16 e1 = fx14MulAdd(v[iA][1], m[iB][1], -v[iB][1], m[iA][1]);
+			int16 e2 = fx14MulAdd(v[iA][1], m[iB][2], -v[iB][1], m[iA][2]);
+			int16 e3 = fx14MulAdd(-v[iA][0], m[iB][0], v[iB][0], m[iA][0]);
+			int16 e4 = fx14MulAdd(-v[iA][0], m[iB][1], v[iB][0], m[iA][1]);
+			int16 e5 = fx14MulAdd(-v[iA][0], m[iB][2], v[iB][0], m[iA][2]);
+
+			// (only near the line of sight: the perspective terms below
+			// are 16 bits)
+			int16 limit = (int16)(ABS(r3->field36.z) << 1);
+			if (ABS(r3->field36.x) >= limit || ABS(r3->field36.y) >= limit)
+				return;
+
+			int16 xz = fx14Div(r3->field36.x, r3->field36.z);
+			int16 yz = fx14Div(r3->field36.y, r3->field36.z);
+			dbl30 = (int16)(e0 - fx14Mul(e2, xz)) / 16384.0;
+			dbl28 = (int16)(e1 - fx14Mul(e2, yz)) / 16384.0;
+			dbl20 = (int16)(e3 - fx14Mul(e5, xz)) / 16384.0;
+			dbl18 = (int16)(e4 - fx14Mul(e5, yz)) / 16384.0;
+
+			double det2 = fx14MulAdd(v[iB][0], v[iA][1], -v[iA][0], v[iB][1]) / 16384.0;
+			dbl68 /= det2;
+			dbl28 = -dbl28;
+			dbl20 = -dbl20;
+			if (r3->viewMirrored) {
+				dbl30 = -dbl30;
+				dbl28 = -dbl28;
+			}
+			double det = dbl30 * dbl18 - dbl28 * dbl20;
+			dbl70 = (1.0 / dbl68) / det;
+			dbl60 = dbl18;
+			dbl58 = -dbl28;
+			dbl50 = -dbl20;
+			dbl48 = dbl30;
+			dbl30 *= dbl68;
+			dbl28 *= dbl68;
+			dbl20 *= dbl68;
+			dbl18 *= dbl68;
+			dbl60 *= dbl70;
+			dbl58 *= dbl70;
+			dbl50 *= dbl70;
+			dbl48 *= dbl70;
 			break;
-		default: // TODO
-			break;
+		}
 		}
 
 		r3->field80 = dbl60;
@@ -402,18 +612,26 @@ void StarTrekEngine::drawR3Shape(R3 *r3) {
 		}
 
 		if (shpImageTop <= shpImageBottom) {
-			bool var3fa = false;
-			if (r3->field1e == 2) {
-				// TODO
-			} else
-				var3fa = (((r3->field24 * _starfieldPointDivisor) << 1) / 3 <= r3->field36.z);
+			// Far enough to draw the bitmap as it is; closer, it's magnified,
+			// and the pixels are sampled with an ordered dither (seeded per
+			// shape) so the magnification doesn't show blocks
+			int32 nearDistance = ((int32)r3->field24 * _starfieldPointDivisor) << 1;
+			bool var3fa;
+			if (r3->field1e == 2)
+				var3fa = !_byte_45b3c || nearDistance / 5 <= r3->field36.z;
+			else
+				var3fa = nearDistance / 3 <= r3->field36.z;
 
+			uint16 ditherSeed = 0;
 			if (!var3fa) {
 				if (r3->field1e == 3) {
-					// Is this used anywhere?
-					//uint16 var3fc = (_frameIndex << 3) ^ _frameIndex;
+					ditherSeed = getRandomWord();
 				} else {
-					// TODO
+					uint16 sum = 0;
+					for (int i = 0; i < 3; i++)
+						for (int j = 0; j < 3; j++)
+							sum += r3->viewMatrix[i][j];
+					ditherSeed = (((int16)sum >> 3) + ((int16)sum >> 6)) ^ sum;
 				}
 			}
 
@@ -427,8 +645,7 @@ void StarTrekEngine::drawR3Shape(R3 *r3) {
 			int16 var3f6 = var3f2 * shpImageTop + (int16)(dbl40 * 256);
 			int16 var3f8 = var3f4 * shpImageTop + (int16)(dbl38 * 256);
 
-			Bitmap tmpBitmap(256, 249);
-			byte *otherBuffer = new byte[256 * 256];
+			Bitmap tmpBitmap(256, 256); // (sampled with 16-bit offsets: a whole 64 KB "segment")
 
 			int16 bitmapWidth = r3->bitmap->width;
 			int16 bitmapHeight = r3->bitmap->height;
@@ -438,22 +655,13 @@ void StarTrekEngine::drawR3Shape(R3 *r3) {
 			if (bitmapWidth > 252)
 				error("Shape width too big in drawR3Shape!");
 
-			for (int i = 0; i < 2; i++)
-				memset(otherBuffer + i * 256, 0, bitmapWidth + 4);
-			for (int i = 0; i < 2; i++)
-				memset(otherBuffer + (bitmapHeight + 2 + i) * 256, 0, bitmapWidth + 4);
+			// The shape goes in with a transparent border round it, which the
+			// edges' samples land in. (Everything else is cleared too: the
+			// buffer is fresh, and sampling wraps in its 64 KB.)
+			memset(tmpBitmap.pixels, 0, 256 * 256);
 
-			for (int i = 0; i < bitmapHeight; i++) {
-				otherBuffer[512 + i * 256 + 0] = 0;
-				otherBuffer[512 + i * 256 + 1] = 0;
-				otherBuffer[512 + i * 256 + bitmapWidth + 2] = 0;
-				otherBuffer[512 + i * 256 + bitmapWidth + 3] = 0;
-			}
-
-			if (r3->field1e == 2) {
-				// TODO
-			} else
-				_gfx->copyRectBetweenBitmaps(&tmpBitmap, 2, 2, r3->bitmap, 0, 0, bitmapWidth, bitmapHeight);
+			// (TODO: ships cloaking, field 0x1c0, are blended in instead)
+			_gfx->copyRectBetweenBitmaps(&tmpBitmap, 2, 2, r3->bitmap, 0, 0, bitmapWidth, bitmapHeight);
 
 			byte *bgPixels = _gfx->getBackgroundPixels() + shpImageTop * SCREEN_WIDTH;
 
@@ -472,19 +680,17 @@ void StarTrekEngine::drawR3Shape(R3 *r3) {
 				if (rowWidth == 0)
 					continue;
 
-				// TODO: the original draws close shapes (!var3fa) with a
-				// different, unimplemented, routine; they're drawn like distant
-				// ones here (a warning for each row instead stalled games whose
-				// console is slow)
-				srcX += 0x80;
-				srcY += 0x80;
+				// (the sub-pixel offsets of the dither, in the original's order)
+				static const byte kDither[8] = { 0x00, 0x80, 0x40, 0xc0, 0x20, 0xa0, 0x60, 0xe0 };
+				int phase = (y + leftBound + ditherSeed) & 7;
 
 				int16 cx = srcX;
 				int16 bx = srcY;
 				byte *di = bgPixels2;
 
 				for (int a = 0; a < rowWidth; a++) {
-					byte b = tmpBitmap.pixels[(bx & 0xff00) + (cx >> 8)];
+					int16 offset = var3fa ? 0x80 : kDither[(phase + a) & 7];
+					byte b = tmpBitmap.pixels[((int16)(bx + offset) & 0xff00) + ((uint16)(int16)(cx + offset) >> 8)];
 					cx += xDiff;
 					bx += yDiff;
 					if (b == 0)
@@ -494,7 +700,6 @@ void StarTrekEngine::drawR3Shape(R3 *r3) {
 				}
 			}
 
-			delete[] otherBuffer;
 		}
 
 		delete[] rightBounds;
@@ -506,14 +711,15 @@ void StarTrekEngine::drawR3Shape(R3 *r3) {
 	}
 }
 
+// Whether a shape (its radius, field22, around it) is in the view: the four
+// planes through the camera and the starfield's edges
 bool StarTrekEngine::sub_1c022(R3 *r3) {
-	//Point3 point = r3->field36;
-	//if (point.z < _flt_50898)
-	//	return false;
-	// TODO: finish this properly (_flt_50898's value). At least nothing
-	// behind the camera is drawn: the intro puts the planet there (z = -1),
-	// which projected it, flipped and huge, over the whole starfield.
-	return r3->field36.z > 0;
+	const int64 x = r3->field36.x, y = r3->field36.y, z = r3->field36.z;
+	const int64 r = r3->field22;
+	const int64 d = _starfieldPointDivisor, hw = _starfieldXVar2, hh = _starfieldYVar2;
+	int64 horizontal = x <= 0 ? d * (x + r) + hw * z : hw * z - d * (x - r);
+	int64 vertical = y <= 0 ? d * (y + r) + hh * z : hh * z - d * (y - r);
+	return horizontal > 0 && vertical > 0;
 }
 
 Point3 StarTrekEngine::constructPoint3ForStarfield(int16 x, int16 y, int16 z) {

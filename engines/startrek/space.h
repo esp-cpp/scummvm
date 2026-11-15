@@ -151,25 +151,32 @@ struct Star {
 struct R3 {
 	Point3 pos; // 0x0
 	Matrix matrix; // 0xc
-	int16 field1e; // 0x1e
-	int16 field20; // 0x20
-	int16 field22; // 0x22
-	int16 field24; // 0x24
+	int16 field1e = 0; // 0x1e (shape type: 1, 2 = ship, 3 = flat bitmap, 4 = explosion)
+	int16 field20 = 0; // 0x20 (for ships: the class, an index into the ship names)
+	int16 field22 = 0; // 0x22 (radius, for culling)
+	int16 field24 = 0; // 0x24 (size)
 	Point3_Short speed; // 0x26
-	int32 funcPtr1; // 0x2c
-	int32 funcPtr2; // 0x30
-	int16 field34; // 0x34
+	int32 funcPtr1 = 0; // 0x2c
+	int32 funcPtr2 = 0; // 0x30
+	int16 field34 = 0; // 0x34
 	Point3 field36; // 0x36
 	Matrix matrix2; // 0x42
-	int32 field54; // 0x54 (used for sorting by draw priority?)
-	int16 field58; // 0x58
-	int16 field5a; // 0x5a
-	Bitmap *bitmap; // 0x68 (was: shpFile)
+	int32 field54 = 0; // 0x54 (used for sorting by draw priority?)
+	int16 field58 = 0; // 0x58
+	int16 field5a = 0; // 0x5a
+	Bitmap *bitmap = nullptr; // 0x68 (was: shpFile)
 	// 0x6a (was: bitmapOffset)
-	double field80; // 0x80
-	double field88; // 0x88
-	double field90; // 0x90
-	double field98; // 0x98
+	// For ships (field1e 1 / 2): the view of the ship the bitmap is
+	// (selectShipView(), the original's funcPtr1 for them), its orientation
+	// as rendered, and whether it's drawn mirrored.
+	bool shipViews = false;
+	int16 viewMatrix[3][3] = {}; // 0x6c
+	bool viewMirrored = false; // 0x7e
+	int16 view = -1; // 0x66
+	double field80 = 0; // 0x80
+	double field88 = 0; // 0x88
+	double field90 = 0; // 0x90
+	double field98 = 0; // 0x98
 };
 
 // Maximum number of stars visible at once in the starfields

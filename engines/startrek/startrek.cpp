@@ -155,6 +155,7 @@ Common::Error StarTrekEngine::run() {
 
 	if (!isDemo)
 		loadBridgeComputerTopics();
+	initEnterpriseR3();
 
 	_gfx->setMouseBitmap(!isDemo ? "pushbtn" : "cursor");
 

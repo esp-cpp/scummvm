@@ -34,7 +34,7 @@ void StarTrekEngine::playIntro() {
 
 	initStarfieldSprite(&_starfieldSprite, new StubBitmap(0, 0), _starfieldRect);
 
-	//delR3(&_enterpriseR3); // TODO: uncomment
+	delR3(&_enterpriseR3);
 
 	R3 planetR3 = R3();
 	planetR3.matrix = initMatrix();
@@ -139,7 +139,6 @@ void StarTrekEngine::playIntro() {
 		case 42: // Enterprise moves toward camera
 			loadSubtitleSprite(-1, &subtitleSprite);
 			addR3(&_enterpriseR3);
-			_enterpriseR3.bitmap = nullptr;
 			_enterpriseR3.field1e = 2;
 			initIntroR3ObjectToMove(&_enterpriseR3, 330, 5000, 0, 0, 18);
 			break;
@@ -163,7 +162,6 @@ void StarTrekEngine::playIntro() {
 			loadSubtitleSprite(3, &subtitleSprite);
 			initIntroR3ObjectToMove(&planetR3, 0, 5000, 0, 5000, 0);
 			planetR3.pos.y = -2500;
-			planetR3.pos.z = -1;
 			initIntroR3ObjectToMove(&_enterpriseR3, -30, 450, 45, 540, 54);
 			break;
 
@@ -179,7 +177,6 @@ void StarTrekEngine::playIntro() {
 			loadSubtitleSprite(6, &subtitleSprite);
 			initIntroR3ObjectToMove(&planetR3, 30, 5600, 30, 5600, 0);
 			planetR3.pos.y = -2500;
-			planetR3.pos.z = -1;
 			initIntroR3ObjectToMove(&_enterpriseR3, -10, 800, 155, 600, 18);
 			break;
 
@@ -188,6 +185,7 @@ void StarTrekEngine::playIntro() {
 			break;
 
 		case 162:
+			starfieldZoomSpeed = 10;
 			delR3(&planetR3);
 			break;
 
@@ -203,15 +201,18 @@ void StarTrekEngine::playIntro() {
 			// TODO: the rest
 			break;
 
-		case 204:
-			// TODO
+		case 204: // the credits stop in front of the camera
+			planetR3.pos.z = _starfieldPointDivisor + _starfieldPosition.z;
+			planetR3.speed.z = 0;
 			break;
 
 		case 216:
-			// TODO
+			if (_showSubtitles)
+				subtitleSprite.setBitmap(_resource->loadBitmapFile("legal"));
 			break;
 
 		case 222:
+			loadSubtitleSprite(-1, &subtitleSprite);
 			delR3(&planetR3);
 			break;
 
@@ -299,7 +300,12 @@ void StarTrekEngine::playIntro() {
 				waitForNextTick();
 		}
 
+		// everything moves, and with the camera
 		_starfieldPosition.z += starfieldZoomSpeed;
+		_enterpriseR3.pos.x += _enterpriseR3.speed.x;
+		_enterpriseR3.pos.z += _enterpriseR3.speed.z + starfieldZoomSpeed;
+		planetR3.pos.x += planetR3.speed.x;
+		planetR3.pos.z += planetR3.speed.z + starfieldZoomSpeed;
 
 		frame++;
 		if (frame >= 0x186)
@@ -308,6 +314,9 @@ void StarTrekEngine::playIntro() {
 
 	_gfx->fadeoutScreen();
 	_gfx->delSprite(&_starfieldSprite);
+	// the Enterprise is back where the game has it
+	addR3(&_enterpriseR3);
+	_enterpriseR3.field1e = 2;
 	// TODO: the rest
 }
 
@@ -326,28 +335,40 @@ void StarTrekEngine::showCreditsScreen(R3 *creditsBuffer, int index, bool delete
 	addR3(creditsBuffer);
 }
 
+// Puts a shape at (srcAngle, srcDepth) round the camera, headed for
+// (destAngle, destDepth), to get there in the given ticks. Angles in degrees.
 void StarTrekEngine::initIntroR3ObjectToMove(R3 *r3, int16 srcAngle, int16 srcDepth, int16 destAngle, int16 destDepth, int16 ticks) {
-	int32 srcAngleX = (int32)floor((double)_sineTable.at(srcAngle / 90) * srcDepth);
-	int32 srcAngleZ = (int32)floor((double)_cosineTable.at(srcAngle / 90) * srcDepth);
-	r3->pos = Point3(srcAngleX + _starfieldPosition.x, 0, srcAngleZ + _starfieldPosition.z);
+	// (in the original's 1/1024ths of a turn)
+	int16 src = (int16)(((int32)srcAngle << 9) / 180);
+	int16 dest = (int16)(((int32)destAngle << 9) / 180);
 
-	int32 destAngleX = (int32)floor((double)_sineTable.at(destAngle / 90) * destDepth);
-	int32 destAngleZ = (int32)floor((double)_cosineTable.at(destAngle / 90) * destDepth);
-	int32 deltaX = destAngleX + _starfieldPosition.x - r3->pos.x;
-	int32 deltaZ = destAngleZ + _starfieldPosition.z - r3->pos.z;
-	Angle angle = atan2(deltaX, deltaZ);
+	r3->pos.x = (int16)(((int32)srcDepth * (int16)round(sin(src * (2 * M_PI / 1024)) * 16384)) >> 14) + _starfieldPosition.x;
+	r3->pos.z = (int16)(((int32)srcDepth * (int16)round(cos(src * (2 * M_PI / 1024)) * 16384)) >> 14) + _starfieldPosition.z;
+	r3->pos.y = 0;
 
-	r3->matrix = initSpeedMatrixForXZMovement(angle, initMatrix());
+	int32 destX = (int16)(((int32)destDepth * (int16)round(sin(dest * (2 * M_PI / 1024)) * 16384)) >> 14) + _starfieldPosition.x;
+	int32 destZ = (int16)(((int32)destDepth * (int16)round(cos(dest * (2 * M_PI / 1024)) * 16384)) >> 14) + _starfieldPosition.z;
+	int32 deltaX = destX - r3->pos.x;
+	int32 deltaZ = destZ - r3->pos.z;
 
-	debugCN(5, kDebugSpace, "initIntroR3ObjectToMove: pos %x,%x,%x; ", r3->pos.x, r3->pos.y, r3->pos.z);
+	// facing where it's going (turned round the y axis)
+	int16 heading = (deltaX == 0 && deltaZ == 0) ? 0 : (int16)round(atan2((double)deltaX, (double)deltaZ) * (512 / M_PI));
+	Fixed14 sinVal = Fixed14::fromRaw((int16)round(sin(heading * (2 * M_PI / 1024)) * 16384));
+	Fixed14 cosVal = Fixed14::fromRaw((int16)round(cos(heading * (2 * M_PI / 1024)) * 16384));
+	Matrix turn = initMatrix();
+	turn[0].x = cosVal;
+	turn[0].z = -sinVal;
+	turn[2].x = sinVal;
+	turn[2].z = cosVal;
+	r3->matrix = initMatrix() * turn;
+
+	debugC(5, kDebugSpace, "initIntroR3ObjectToMove: pos %x,%x,%x", r3->pos.x, r3->pos.y, r3->pos.z);
 
 	if (ticks != 0) {
-		debugC(5, kDebugSpace, "speed %x,%x,%x\n", r3->speed.x, r3->speed.y, r3->speed.z);
 		r3->speed.x = deltaX / ticks;
 		r3->speed.z = deltaZ / ticks;
 		r3->speed.y = 0;
 	} else {
-		debugC(5, kDebugSpace, "speed 0\n");
 		r3->speed.x = 0;
 		r3->speed.z = 0;
 		r3->speed.y = 0;

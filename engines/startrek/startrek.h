@@ -366,6 +366,14 @@ private:
 	R3 *sub_19f24(R3 *r3);
 	void drawR3Shape(R3 *r3);
 	bool sub_1c022(R3 *r3);
+	/**
+	 * For a ship: loads the stored view of it ("ENT%02x.R3S" and so on) closest
+	 * to the direction it's seen from (the original's funcPtr1 for ships).
+	 */
+	bool selectShipView(R3 *r3);
+	void releaseShipView(R3 *r3);
+	/// The Enterprise as the original sets it up (ENTERPRI.DSC)
+	void initEnterpriseR3();
 
 	Point3 constructPoint3ForStarfield(int16 x, int16 y, int16 z);
 	Point3 matrixMult(const Matrix &weight, const Point3 &point);

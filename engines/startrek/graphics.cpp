@@ -119,6 +119,11 @@ void Graphics::unlockScreenPixels() {
 
 void Graphics::clearScreenAndPriBuffer() {
 	Common::fill(_priData, _priData + sizeof(_priData), 0);
+	// the background too, as the original does: sprites drawn later restore
+	// what's under them from it (the intro's captions showed bits of the
+	// gold logo screen otherwise)
+	if (_backgroundImage)
+		memset(_backgroundImage->pixels, 0, _backgroundImage->width * _backgroundImage->height);
 
 	_vm->_system->fillScreen(_screenRect, 0);
 	_vm->_system->updateScreen();
