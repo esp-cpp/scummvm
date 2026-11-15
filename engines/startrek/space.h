@@ -148,6 +148,71 @@ struct Star {
 
 // Struct for objects in space.
 // TODO: what does this stand for? Maybe rename it.
+// A ship's shields (one per side) and systems: (enabled, maximum, current)
+struct ShipSystem {
+	int16 enabled = 0;
+	int16 max = 0;
+	int16 cur = 0;
+};
+
+// The ship's systems, as the damage tables (DS:1192) name them
+enum ShipSystemIndex {
+	kSystemHull = 0,
+	kSystemHelm = 1,     // ("bridge") turning and acceleration scale with it
+	kSystemWeapon0 = 2,  // the weapons' mounts, one per weapon (photon
+	                     // torpedoes 2-3, phasers 4-5 on the Enterprise)
+	kSystemSensors = 6,
+	kSystemPower0 = 7,   // power: 7-9
+	kNumShipSystems = 10
+};
+
+// One of a ship's weapons, from its .DSC (0x18 bytes)
+struct ShipWeapon {
+	uint32 nextFire = 0;   // 0x0: the tick it may fire again
+	int16 life = 0;        // 0x4: of its shots, in ticks
+	int16 speed = 0;       // 0x6: of its shots (plus the ship's)
+	int16 interval = 0;    // 0x8: ticks between shots
+	int32 offset[3] = {};  // 0xa: where on the ship it fires from
+	int16 kind = 0;        // 0x16: the shot's field20: 0 photon torpedo, 1 phaser, 2 plasma
+};
+
+// A ship's state in space (the original's 0x1ce byte ships, DS:b708 and the
+// Enterprise at DS:d49e; the offsets are those)
+struct ShipState {
+	ShipSystem shields[6];             // 0xa0: by side (findShipSide)
+	ShipSystem systems[kNumShipSystems]; // 0xc4
+	int32 maxTurnRate = 0;             // 0x100 (16.16; the integer part indexes the turn tables)
+	int32 turnAccel = 0;               // 0x104
+	int32 maxSpeed = 0;                // 0x108
+	int32 speedAccel = 0;              // 0x10c
+	int32 requestedSpeed = 0;          // 0x110
+	int32 targetTurnRate[3] = {};      // 0x114: round x (pitch), y (yaw), z (roll)
+	int32 speedTarget = 0;             // 0x120: what the power allows of the request
+	int32 speed = 0;                   // 0x124
+	int32 turnRate[3] = {};            // 0x128
+	int32 turned[3] = {};              // 0x134: how far it's turned (1/1024 turns, 16.16)
+	int16 timer = 0;                   // 0x140: counts down each tick (maneuvers)
+	int16 power = 0;                   // 0x142: left over this tick
+	int16 shieldsRequested = 0;        // 0x144
+	int16 shieldsUp = 0;               // 0x146
+	int16 weaponsRequested = 0;        // 0x148
+	int16 weaponsArmed = 0;            // 0x14a
+	int32 distance = 0;                // 0x14c: to the Enterprise (enemies)
+	int32 closing = 0;                 // 0x150: change of the distance this tick
+	int16 maneuvering = 0;             // 0x154
+	int16 maneuver = 0;                // 0x156: which (2f0d:2781, 28bf, 2b51)
+	int16 maneuverStep = 0;            // 0x15a
+	ShipWeapon weapons[4];             // 0x15c
+	int32 closeRange = 0;              // 0x1bc: nearer than this, it maneuvers
+	int16 canCloak = 0;                // 0x1c0
+	int16 cloakRequested = 0;          // 0x1c2
+	int16 cloaked = 0;                 // 0x1c4
+	int16 cloakFading = 0;             // 0x1c6
+	int16 destroyed = 0;               // 0x1c8: exploding
+	int16 explosionTimer = 0;          // 0x1ca
+	int16 leaving = 0;                 // 0x1cc: flies away and is gone
+};
+
 struct R3 {
 	Point3 pos; // 0x0
 	Matrix matrix; // 0xc
@@ -187,6 +252,15 @@ struct R3 {
 	double field88 = 0; // 0x88
 	double field90 = 0; // 0x90
 	double field98 = 0; // 0x98
+
+	// A ship (field1e 2)
+	ShipState ship;
+	// A shot (field1e 3, the original's 0xa8 byte objects at DS:7420): its
+	// ship, ticks left, damage, colour
+	R3 *owner = nullptr; // 0xa0
+	int16 life = 0;      // 0xa2
+	int16 damage = 0;    // 0xa4
+	int16 color = 0;     // 0xa6
 };
 
 // Maximum number of stars visible at once in the starfields
@@ -194,6 +268,16 @@ struct R3 {
 
 // Maximum number of R3 objects in space at once
 #define NUM_SPACE_OBJECTS 0x30
+// Enemy ships at once (DS:b708), and shots (DS:7420)
+#define NUM_ENEMY_SHIPS 4
+#define NUM_SHOTS 0x20
+
+// The space simulation's messages for the bridge (the original's events)
+enum SpaceEvent {
+	kSpaceEventShieldsDown = 2,
+	kSpaceEventWeaponsDown = 3,
+	kSpaceEventRepaired = 7
+};
 
 // The original's 3D arithmetic, exactly (space.cpp): angles in 1/1024ths
 // of a turn, matrices and sines 2.14 fixed point

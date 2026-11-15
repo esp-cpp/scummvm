@@ -136,6 +136,7 @@ StarTrekEngine::~StarTrekEngine() {
 
 	delete _starsFile;
 	delete[] _planetTables;
+	freeCombatShapes();
 	freePlanetR3(&_planetR3);
 	delete _gfx;
 	delete _sound;

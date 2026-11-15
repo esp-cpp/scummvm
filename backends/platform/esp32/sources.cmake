@@ -262,6 +262,7 @@ set(SCUMMVM_SOURCES
   engines/startrek/startrek.cpp
   engines/startrek/text.cpp
   engines/startrek/textbox.cpp
+  engines/startrek/spacecombat.cpp
   engines/startrek/viewscreen.cpp
   graphics/big5.cpp
   graphics/blit/blit-alpha.cpp

@@ -169,13 +169,29 @@ void StarTrekEngine::updateStarfieldAndShips(bool arg0) {
 
 		switch (r3->field1e) {
 		case 1:
-			r3 = sub_19f24(r3);
-			break;
-		case 2: // a ship (TODO: exploding, R3 field 0x1c8)
-			r3 = sub_19f24(r3);
-			break;
 		case 3:
 			r3 = sub_19f24(r3);
+			break;
+		case 2:
+			if (r3->ship.destroyed == 0) {
+				r3 = sub_19f24(r3);
+			} else if (++r3->ship.explosionTimer < 0x2e) {
+				// exploding: 46 frames, bigger after 24
+				int16 radius = r3->field22, size = r3->field24;
+				bool big = r3->ship.explosionTimer >= 0x18;
+				r3->field24 = big ? 12 : 6;
+				r3->field22 = (big ? 2 : 1) * r3->field22;
+				R3 *visible = sub_19f24(r3);
+				r3->field22 = radius;
+				r3->field24 = size;
+				r3 = visible;
+			} else {
+				if (r3 == &_enterpriseR3)
+					enterpriseDestroyed = true;
+				else
+					delR3(r3);
+				r3 = nullptr;
+			}
 			break;
 		default:
 			break;
@@ -194,14 +210,23 @@ void StarTrekEngine::updateStarfieldAndShips(bool arg0) {
 
 			switch (r3->field1e) {
 			case 1:
-			case 2:
 				drawR3Shape(r3);
 				break;
-			case 3:
-				if (r3->field20 == 1) {
-					// TODO
-				} else
+			case 2:
+				if (r3->ship.destroyed == 0) {
 					drawR3Shape(r3);
+				} else {
+					// (1972:04dd) the ship for 21 frames, its explosion over it
+					if (r3->ship.explosionTimer < 0x15)
+						drawR3Shape(r3);
+					drawShipExplosion(r3);
+				}
+				break;
+			case 3:
+				if (r3->field20 == 1)
+					drawPhaserBeam(r3);
+				else
+					drawShot(r3);
 				break;
 			default:
 				break;
@@ -216,7 +241,9 @@ void StarTrekEngine::updateStarfieldAndShips(bool arg0) {
 		return;
 	}
 
-	// TODO: static on enterprise viewscreen?
+	// static, when the sensors are damaged (1972:019b)
+	if (arg0)
+		drawViewscreenStatic();
 }
 
 R3 *StarTrekEngine::sub_19f24(R3 *r3) {
@@ -593,14 +620,9 @@ void StarTrekEngine::initEnterpriseR3() {
 	_enterpriseR3.matrix = initMatrix();
 	_enterpriseR3.field1e = 2;
 	_enterpriseR3.shipViews = true;
-	// its class (the views to draw it with), radius and size
-	Common::MemoryReadStreamEndian *file = _resource->loadFile("ENTERPRI.DSC", 0, false);
-	if (file) {
-		_enterpriseR3.field20 = file->readSint16();
-		_enterpriseR3.field22 = file->readSint16();
-		_enterpriseR3.field24 = file->readSint16();
-		delete file;
-	}
+	// its class (the views to draw it with), radius, size, systems, flight
+	// model and weapons
+	loadShipClass(&_enterpriseR3, "ENTERPRI");
 	addR3(&_enterpriseR3);
 }
 
@@ -677,7 +699,7 @@ void StarTrekEngine::drawR3Shape(R3 *r3) {
 	// (nothing at the camera or behind it: the camera may be the Enterprise's)
 	if (r3->field36.z <= 0)
 		return;
-	if (r3->shipViews && !selectShipView(r3))
+	if (r3->shipViews && r3->field1e == 2 && !selectShipView(r3))
 		return;
 	if (r3->planet && !selectPlanetView(r3))
 		return;
@@ -943,7 +965,7 @@ void StarTrekEngine::drawR3Shape(R3 *r3) {
 			uint16 ditherSeed = 0;
 			if (!var3fa) {
 				if (r3->field1e == 3) {
-					ditherSeed = getRandomWord();
+					ditherSeed = (uint16)(_frameIndex >> 3) ^ (uint16)_frameIndex;
 				} else {
 					uint16 sum = 0;
 					for (int i = 0; i < 3; i++)
@@ -978,8 +1000,22 @@ void StarTrekEngine::drawR3Shape(R3 *r3) {
 			// buffer is fresh, and sampling wraps in its 64 KB.)
 			memset(tmpBitmap.pixels, 0, 256 * 256);
 
-			// (TODO: ships cloaking, field 0x1c0, are blended in instead)
+			// (a cloaking ship fades through the cloak palettes, 1972:2453)
+			const byte *lut = nullptr;
+			if (r3->field1e == 2 && r3->ship.canCloak != 0) {
+				ShipState &s = r3->ship;
+				s.cloakFading = CLIP<int16>(s.cloakFading + (s.cloaked ? 1 : -1), 0, 0x1c);
+				if (s.cloakFading >= 0x14)
+					lut = cloakTable(s.cloakFading - 0x14);
+			}
 			_gfx->copyRectBetweenBitmaps(&tmpBitmap, 2, 2, r3->bitmap, 0, 0, bitmapWidth, bitmapHeight);
+			if (lut) {
+				for (int yy = 0; yy < bitmapHeight; yy++) {
+					byte *row = tmpBitmap.pixels + (yy + 2) * 256 + 2;
+					for (int xx = 0; xx < bitmapWidth; xx++)
+						row[xx] = lut[row[xx]];
+				}
+			}
 
 			byte *bgPixels = _gfx->getBackgroundPixels() + shpImageTop * SCREEN_WIDTH;
 

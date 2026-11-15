@@ -64,6 +64,8 @@ public:
 	bool isMidiPlaying();
 	void loadMusicFile(const Common::String &baseSoundName);
 	void playMidiMusicTracks(MidiTracks startTrack, MidiLoopType loopType = kLoopTypeNone);
+	/// The music track looping (2948:1257)
+	MidiTracks getLoopingMidiTrack() const { return _loopingMidiTrack; }
 	void playVoc(const Common::String &baseSoundName);
 	void playSpeech(const Common::String &basename);
 	void stopAllVocSounds();

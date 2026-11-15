@@ -23,6 +23,8 @@
 #define STARTREK_H
 
 #include "common/events.h"
+#include "common/hash-str.h"
+#include "common/hashmap.h"
 #include "common/list.h"
 #include "common/ptr.h"
 #include "common/random.h"
@@ -629,11 +631,52 @@ public:
 	void showFullScreenSpace();
 	void showBridgeViewscreen();
 	/// Space drawn as the camera sees it now
-	void renderSpace();
+	void renderSpace(bool staticNoise = false);
 	/// Each tick on the bridge: the Enterprise moving, the viewscreen
 	void updateBridgeViewscreen();
 	void enterOrbitSequence();
 	void leaveOrbitSequence();
+
+	// spacecombat.cpp: ships and their fights
+	int combatRand();
+	bool loadShipClass(R3 *r3, const Common::String &name);
+	/// An enemy ship from its .DSC near the Enterprise (2f0d:0e49)
+	R3 *spawnShip(const Common::String &name);
+	void shipPower(R3 *r3);
+	void moveShip(R3 *r3);
+	void repairShip(R3 *r3);
+	bool fireWeapon(R3 *r3, int weapon, const Point3 *dir);
+	bool damageSystem(R3 *r3, int side, int16 damage);
+	void hitShip(R3 *r3, R3 *shot);
+	void moveShots();
+	void enemyFire(R3 *r3, const Point3 &local, const Point3 &toEnterprise);
+	bool shipManeuver(R3 *r3);
+	void enemyShipTick(R3 *r3);
+	void enemyShipsTick();
+	void removeShots();
+	bool boostPower();
+	/// What the ships and shots do each tick in space
+	void spaceCombatTick();
+	Bitmap *combatShape(const Common::String &name);
+	void freeCombatShapes();
+	void drawShot(R3 *r3);
+	void drawShipExplosion(R3 *r3);
+	void drawPhaserBeam(R3 *r3);
+	void drawViewscreenStatic();
+	bool viewscreenStatic();
+	const byte *cloakTable(int level);
+	void handleSpaceEvents();
+	void steerEnterprise(Common::Point mouse);
+	void centerEnterpriseControls();
+	void setEnterpriseSpeed(int step);
+	bool inSpaceView(Common::Point p);
+	void fireEnterpriseWeapons(bool torpedoes, bool phasers);
+	void setRepairTarget(int16 target);
+	void resetEnterpriseSystems();
+	void stopShip(R3 *r3);
+	/// A message of the space simulation, for the bridge (the original's
+	/// event queue, 1e8e:17b9, read by 11dc:1c82)
+	void addSpaceEvent(int type, int data);
 	/// The star map: the star picked (its kPlanet...)
 	int chooseStarMapDestination();
 	/// Going to warp, to the star system set
@@ -832,10 +875,27 @@ public:
 	// The camera is the Enterprise's (the bridge's viewscreen) unless a
 	// sequence moves it itself
 	bool _cameraOnEnterprise = true;
-	// The Enterprise cruising (16.16, along its heading) between the 3D
-	// sequences, until there's a flight model
-	int32 _enterpriseCruise = 0;
 	Common::MemoryReadStreamEndian *_starsFile = nullptr;
+
+	// spacecombat.cpp: the enemy ships (DS:b708) and the shots (DS:7420)
+	R3 _enemyShips[NUM_ENEMY_SHIPS];
+	R3 _shots[NUM_SHOTS];
+	// target analysis' ship (DS:557e)
+	R3 *_targetAnalysisShip = nullptr;
+	// there are enemies (DS:005a)
+	bool _inCombat = false;
+	// what Scotty is repairing (DS:11ce): a system, or 0x7fff the shields, -1 nothing
+	int16 _repairTarget = -1;
+	// Scotty's extra power (DS:55e2..55ec)
+	bool _extraPowerUsed = false;
+	int32 _extraPowerTicks = 0;
+	int16 _extraPower = 0;
+	Common::HashMap<Common::String, Bitmap *> _combatShapes;
+	byte _cloakTable[256];
+	int _cloakLevel = -1;
+	Common::List<int> _spaceEvents;
+	// Insert / Delete held: roll (DS:d19e)
+	int _rollKey = 0;
 	R3 *_r3List[NUM_SPACE_OBJECTS];
 	R3 *_orderedR3List[NUM_SPACE_OBJECTS];
 	Matrix _starPositionMatrix;

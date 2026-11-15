@@ -112,24 +112,39 @@ void StarTrekEngine::showBridgeViewscreen() {
 	_spaceFullScreen = false;
 }
 
-void StarTrekEngine::renderSpace() {
+void StarTrekEngine::renderSpace(bool staticNoise) {
 	if (_cameraOnEnterprise) {
 		// (11dc:1f75) the viewscreen is the Enterprise's
 		_starfieldPosition = _enterpriseR3.pos;
 		_someMatrix = _enterpriseR3.matrix;
 	}
-	updateStarfieldAndShips(false);
+	updateStarfieldAndShips(staticNoise);
 	_gfx->drawAllSprites();
 }
 
 void StarTrekEngine::updateBridgeViewscreen() {
-	if (_enterpriseCruise) {
-		for (int i = 0; i < 3; i++)
-			_enterpriseR3.pos[i] += ((int32)_enterpriseR3.matrix[2][i].raw() * _enterpriseCruise) >> 14;
+	spaceCombatTick();
+	// The Enterprise exploding: watched from outside, across the screen
+	// (11dc:042c)
+	if (_enterpriseR3.ship.destroyed && _enterpriseR3.ship.explosionTimer >= 0 && _cameraOnEnterprise) {
+		showFullScreenSpace();
+		Matrix cam = _enterpriseR3.matrix;
+		trekPreRotateY(cam, 0x40);
+		static const int32 kOffset[3] = { -150, 50, -500 };
+		Point3 offset;
+		for (int j = 0; j < 3; j++) {
+			int32 sum = 0;
+			for (int i = 0; i < 3; i++)
+				sum += kOffset[i] * cam[i][j].raw();
+			offset[j] = (int16)(sum >> 14);
+		}
+		_starfieldPosition = _enterpriseR3.pos + offset;
+		_someMatrix = cam;
+		_cameraOnEnterprise = false;
 	}
 	// (the planet turns, 11dc:1c82)
 	trekPreRotateY(_planetR3.matrix, 4);
-	renderSpace();
+	renderSpace(viewscreenStatic());
 }
 
 void StarTrekEngine::waitSpaceTick() {
@@ -178,7 +193,7 @@ void StarTrekEngine::enterOrbitSequence() {
 	trekPreRotateX(cameraMatrix, -0x20);
 	_enterpriseR3.pos = camera;
 	_enterpriseR3.matrix = cameraMatrix;
-	_enterpriseCruise = 0;
+	stopShip(&_enterpriseR3);
 	_cameraOnEnterprise = true;
 }
 
@@ -216,7 +231,9 @@ void StarTrekEngine::leaveOrbitSequence() {
 	_gfx->fadeoutScreen();
 	_gfx->clearScreenAndPriBuffer();
 
-	_enterpriseCruise = 0x19;
+	// (stopped, nudged on: 346c:091c, 2f0d:0d22)
+	stopShip(&_enterpriseR3);
+	_enterpriseR3.ship.speed = MIN<int32>(0x190000, _enterpriseR3.ship.speedAccel);
 	_cameraOnEnterprise = true;
 }
 
@@ -254,7 +271,7 @@ void StarTrekEngine::showMissionStartEnterpriseFlyby(Common::String sequence, Co
 	_someMatrix = initMatrix();
 	_enterpriseR3.matrix = initMatrix();
 	trekPreRotateY(_enterpriseR3.matrix, 0x100);
-	_enterpriseCruise = 0;
+	stopShip(&_enterpriseR3);
 	bool lookAtEnterprise = true;
 	_cameraOnEnterprise = false;
 
@@ -297,8 +314,10 @@ void StarTrekEngine::showMissionStartEnterpriseFlyby(Common::String sequence, Co
 			showBridgeViewscreen();
 			lookAtEnterprise = false;
 			_cameraOnEnterprise = true;
+			// (the Enterprise at a quarter of her speed from now)
 			start[1][0] = velocity[1][0] * t;
-			velocity[1][0] = 10;
+			velocity[1][0] = (int16)(_enterpriseR3.ship.maxSpeed >> 18);
+			_enterpriseR3.ship.requestedSpeed = _enterpriseR3.ship.maxSpeed >> 2;
 			break;
 		default:
 			break;
@@ -315,7 +334,6 @@ void StarTrekEngine::showMissionStartEnterpriseFlyby(Common::String sequence, Co
 	}
 	if (titleShown)
 		_gfx->delSprite(&title);
-	_enterpriseCruise = 10;
 	_cameraOnEnterprise = true;
 }
 

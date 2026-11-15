@@ -1008,11 +1008,14 @@ void StarTrekEngine::handleBridgeEvents() {
 			return;
 		}
 
+		// (while the Enterprise explodes, only time passes)
+		if (_enterpriseR3.ship.destroyed && event.type != TREKEVENT_TICK)
+			return;
+
 		switch (event.type) {
 		case TREKEVENT_TICK:
 			updateActorAnimations();
-			if (!_spaceFullScreen)
-				updateBridgeViewscreen();
+			updateBridgeViewscreen();
 
 			//updateMouseBitmap();
 			renderBanBelowSprites();
@@ -1028,18 +1031,28 @@ void StarTrekEngine::handleBridgeEvents() {
 			// the save files too; entering a room clears the queue anyway)
 			if (_roomFrameCounter >= 2)
 				_gfx->incPaletteFadeLevel();
+			handleSpaceEvents();
 			break;
 
 		case TREKEVENT_LBUTTONDOWN:
-			bridgeLeftClick();
+			// on the viewscreen the captain flies and fires (the original's
+			// ship mode), elsewhere picks his crew
+			if (inSpaceView(_gfx->getMousePos())) {
+				steerEnterprise(_gfx->getMousePos());
+				fireEnterpriseWeapons(false, true);
+			} else {
+				bridgeLeftClick();
+			}
 			break;
 
 		case TREKEVENT_MOUSEMOVE:
-			// TODO
+			if (inSpaceView(_gfx->getMousePos()))
+				steerEnterprise(_gfx->getMousePos());
 			break;
 
 		case TREKEVENT_RBUTTONDOWN:
-			// TODO
+			if (inSpaceView(_gfx->getMousePos()))
+				fireEnterpriseWeapons(true, false);
 			break;
 
 		case TREKEVENT_KEYDOWN:
@@ -1059,14 +1072,17 @@ void StarTrekEngine::handleBridgeEvents() {
 			case Common::KEYCODE_RETURN:
 			case Common::KEYCODE_KP_ENTER:
 			case Common::KEYCODE_F1:
+			case Common::KEYCODE_KP_PLUS:
 				// Fire phasers
-				// TODO
+				fireEnterpriseWeapons(false, true);
 				break;
 			case Common::KEYCODE_SPACE:	// Fire photon torpedoes
-				// TODO
+			case Common::KEYCODE_F2:
+			case Common::KEYCODE_KP_MINUS:
+				fireEnterpriseWeapons(true, false);
 				break;
 			case Common::KEYCODE_v:	// Toggle between the normal bridge view and full screen view
-				// TODO
+				handleBridgeMenu(kBridgeStarfieldFullScreen);
 				break;
 			case Common::KEYCODE_TAB:	// Toggle between movement/fire mode and crew selection mode
 				// TODO
@@ -1081,7 +1097,7 @@ void StarTrekEngine::handleBridgeEvents() {
 				handleBridgeMenu(kBridgeSuluOrbit);
 				break;
 			case Common::KEYCODE_KP5:	// Center controls
-				// TODO
+				centerEnterpriseControls();
 				break;
 			case Common::KEYCODE_n:	// Main star navigational map
 				handleBridgeMenu(kBridgeChekovNavigation);
@@ -1116,10 +1132,11 @@ void StarTrekEngine::handleBridgeEvents() {
 					showQuitGamePrompt(20, 20);
 				break;
 			case Common::KEYCODE_TILDE:	// Ship speed: reverse
-				// TODO
+			case Common::KEYCODE_BACKQUOTE:
+				setEnterpriseSpeed(-1);
 				break;
 			case Common::KEYCODE_1:	// Ship speed: stop
-				// TODO
+				setEnterpriseSpeed(0);
 				break;
 			case Common::KEYCODE_2:
 			case Common::KEYCODE_3:
@@ -1131,7 +1148,7 @@ void StarTrekEngine::handleBridgeEvents() {
 			case Common::KEYCODE_9:
 			case Common::KEYCODE_0:
 				// Ship speed: toggle slow -> fast
-				// TODO
+				setEnterpriseSpeed(event.kbd.keycode == Common::KEYCODE_0 ? 9 : event.kbd.keycode - Common::KEYCODE_1);
 				break;
 			default:
 				break;
@@ -1149,7 +1166,7 @@ void StarTrekEngine::handleBridgeMenu(int menuEvent) {
 	const char *lowerShieldsText = "#BRID\\B_337#Lowering shields, Captain.";
 	const char *armWeaponsText = "#BRID\\B_351#Arming weapons.";
 	const char *disarmWeaponsText = "#BRID\\B_354#Disarming weapons.";
-	//const char *emergencyPowerText = "#BRID\\BRID_S32#I don't know how long she can take it, Captain.";
+	const char *emergencyPowerText = "#BRID\\BRID_S32#I don't know how long she can take it, Captain.";
 	const char *noEmergencyPowerText = "#BRID\\BRID_S41#She can't take it, Captain.";
 	const char *targetAnalysisOnText = "#BRID\\B_344#Target Analysis On.";
 	const char *targetAnalysisOffText = "#BRID\\B_343#Target Analysis Off.";
@@ -1159,14 +1176,17 @@ void StarTrekEngine::handleBridgeMenu(int menuEvent) {
 	case kBridgeKirkCommand:
 		showBridgeMenu("command", 60, 100);
 		break;
-	case kBridgeUnk1:
-		// TODO
+	case kBridgeUnk1: // fire phasers
+		fireEnterpriseWeapons(false, true);
 		break;
-	case kBridgeUnk2:
-		// TODO
+	case kBridgeUnk2: // fire photon torpedoes
+		fireEnterpriseWeapons(true, false);
 		break;
-	case kBridgeStarfieldFullScreen:
-		// TODO
+	case kBridgeStarfieldFullScreen: // the bridge or space across the screen (11dc:2128 0x03)
+		if (_spaceFullScreen)
+			showBridgeViewscreen();
+		else
+			showFullScreenSpace();
 		break;
 	case kBridgeKirkCaptainsLog: // Kirk, captain's log
 		captainsLog();
@@ -1186,9 +1206,8 @@ void StarTrekEngine::handleBridgeMenu(int menuEvent) {
 	case kBridgeScottyDamageControl: // Scotty, damage control
 		showBridgeMenu("repair", 30, 30);
 		break;
-	case kBridgeScottyEmergencyPower: // Scotty, emergency power
-		// TODO: check for emergency power
-		showTextboxBridge(kBridgeTalkerScotty, noEmergencyPowerText);
+	case kBridgeScottyEmergencyPower: // Scotty, emergency power (2f0d:30ef)
+		showTextboxBridge(kBridgeTalkerScotty, boostPower() ? emergencyPowerText : noEmergencyPowerText);
 		break;
 	case kBridgeUhura: // Uhura, communications
 		bridgeCrewAction(kBridgeTalkerUhura);
@@ -1215,13 +1234,26 @@ void StarTrekEngine::handleBridgeMenu(int menuEvent) {
 	case kBridgeChekovRepairBridge:
 	case kBridgeChekovRepairHull:
 	case kBridgeChekovRepairWarpDrives:
-		// TODO: Repair ship part (-1, 4, 2, 6, 1, 0, 7)
+	{
+		// what Scotty mends first (2f0d:192c)
+		static const int16 kRepairTargets[] = { 0x7fff, 4, 2, 6, 1, 0, 7 };
+		setRepairTarget(kRepairTargets[menuEvent - kBridgeChekovRepairShields]);
 		showTextboxBridge(kBridgeTalkerScotty, ayeSirText);
+	}
 		break;
 	case kBridgeSuluTargetAnalysis: // Chekov, target analysis
 		_enterpriseState.targetAnalysis = !_enterpriseState.targetAnalysis;
 		showTextboxBridge(kBridgeTalkerSulu, _enterpriseState.targetAnalysis ? targetAnalysisOnText : targetAnalysisOffText);
-		// TODO: Target analysis
+		// the first enemy, then whichever the Enterprise last hit
+		_targetAnalysisShip = nullptr;
+		if (_enterpriseState.targetAnalysis) {
+			for (int i = 0; i < NUM_ENEMY_SHIPS; i++) {
+				if (_enemyShips[i].field1e != 0) {
+					_targetAnalysisShip = &_enemyShips[i];
+					break;
+				}
+			}
+		}
 		break;
 	default:
 		break;
