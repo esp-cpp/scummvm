@@ -1,5 +1,0 @@
-free scummvm_psram_free
-_ZdlPv scummvm_psram_delete
-_ZdaPv scummvm_psram_delete_array
-_ZdlPvj scummvm_psram_delete_sized
-_ZdaPvj scummvm_psram_delete_array_sized

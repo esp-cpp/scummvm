@@ -197,6 +197,15 @@ TEMPLATE
 void BASESTRING::incRefCount() const {
 	assert(!isStorageIntern());
 	if (_extern._refCount == nullptr) {
+#ifdef SCUMMVM_STRING_REFCOUNT_MALLOC
+		// (each ref count is the string's own: a global pool never gives its
+		// pages back, which a backend that releases a game's memory whole
+		// can't have)
+		_extern._refCount = (int *)malloc(sizeof(int));
+		assert(_extern._refCount);
+		*_extern._refCount = 2;
+		return;
+#endif
 #ifndef SCUMMVM_UTIL
 		lockMemoryPoolMutex();
 #endif
@@ -227,6 +236,9 @@ void BASESTRING::decRefCount(int *oldRefCount) {
 		// The ref count reached zero, so we free the string storage
 		// and the ref count storage.
 		if (oldRefCount) {
+#ifdef SCUMMVM_STRING_REFCOUNT_MALLOC
+			free(oldRefCount);
+#else
 #ifndef SCUMMVM_UTIL
 			lockMemoryPoolMutex();
 #endif
@@ -234,6 +246,7 @@ void BASESTRING::decRefCount(int *oldRefCount) {
 			g_refCountPool->freeChunk(oldRefCount);
 #ifndef SCUMMVM_UTIL
 			unlockMemoryPoolMutex();
+#endif
 #endif
 		}
 		// Coverity thinks that we always free memory, as it assumes
