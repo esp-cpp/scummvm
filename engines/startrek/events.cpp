@@ -53,6 +53,13 @@ void StarTrekEngine::pollEvents(bool queueEvents) {
 			}
 			break;
 
+		case Common::EVENT_LBUTTONUP:
+			if (queueEvents) {
+				trekEvent.type = TREKEVENT_LBUTTONUP;
+				addEventToQueue(trekEvent);
+			}
+			break;
+
 		case Common::EVENT_RBUTTONDOWN:
 			if (queueEvents) {
 				trekEvent.type = TREKEVENT_RBUTTONDOWN;

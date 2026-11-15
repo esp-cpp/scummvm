@@ -223,7 +223,10 @@ void StarTrekEngine::updateStarfieldAndShips(bool arg0) {
 				}
 				break;
 			case 3:
-				if (r3->field20 == 1)
+				// a shot, or (in the intro) the planet and the credits
+				if (r3 < _shots || r3 >= _shots + NUM_SHOTS)
+					drawR3Shape(r3);
+				else if (r3->field20 == 1)
 					drawPhaserBeam(r3);
 				else
 					drawShot(r3);
