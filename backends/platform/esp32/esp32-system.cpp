@@ -183,7 +183,22 @@ public:
 	// backends exit()): it jumps back to the engine task's start, which
 	// deletes the engine
 	void quit() override;
-	void logMessage(LogMessageType::Type type, const char *message) override { fputs(message, stdout); }
+	// (the console is slow: a message an engine repeats every frame, or every
+	// row of one, would hold the game up, so repeats are counted instead)
+	void logMessage(LogMessageType::Type type, const char *message) override {
+		xSemaphoreTake(_logMutex, portMAX_DELAY); // (the audio task logs too)
+		if (strncmp(_lastLog, message, sizeof(_lastLog)) == 0) {
+			_logRepeats++;
+			xSemaphoreGive(_logMutex);
+			return;
+		}
+		if (_logRepeats)
+			printf("(repeated %u times)\n", _logRepeats);
+		_logRepeats = 0;
+		Common::strlcpy(_lastLog, message, sizeof(_lastLog));
+		fputs(message, stdout);
+		xSemaphoreGive(_logMutex);
+	}
 	void addSysArchivesToSearchSet(Common::SearchSet &s, int priority) override {}
 	Common::Path getDefaultConfigFileName() override { return Common::Path("/sdcard/saves/scummvm.ini", '/'); }
 
@@ -203,6 +218,11 @@ public:
 	bool _quit = false;
 
 private:
+	// (not a Common::Mutex: that asks g_system, which isn't set while this is made)
+	SemaphoreHandle_t _logMutex = xSemaphoreCreateMutex();
+	char _lastLog[160] = {}; // (not a String: those go with the game's arena)
+	uint _logRepeats = 0;
+
 	void pollInput();
 	void pushMouse(Common::EventType type) {
 		Common::Event e;
@@ -637,6 +657,21 @@ void scummvm_prepare() {
 		PluginManager::instance().loadAllPlugins();
 		PluginManager::instance().loadDetectionPlugin();
 		ConfMan.loadDefaultConfigFile(Common::Path());
+		// (base/commandLine.cpp's registerDefaults(), which this build
+		// doesn't have: the ones engines read. Without them a volume reads
+		// as 0 when an engine syncs its sound settings -- silent speech.)
+		ConfMan.registerDefault("music_volume", 192);
+		ConfMan.registerDefault("sfx_volume", 192);
+		ConfMan.registerDefault("speech_volume", 192);
+		ConfMan.registerDefault("music_mute", false);
+		ConfMan.registerDefault("sfx_mute", false);
+		ConfMan.registerDefault("speech_mute", false);
+		ConfMan.registerDefault("mute", false);
+		ConfMan.registerDefault("music_driver", "auto");
+		ConfMan.registerDefault("language", "en");
+		ConfMan.registerDefault("subtitles", true);
+		ConfMan.registerDefault("talkspeed", 60);
+		ConfMan.registerDefault("confirm_exit", false);
 		// singletons a game would otherwise make in its arena (which goes
 		// when the game ends): made now, in the heap
 		GUI::GuiManager::instance();
